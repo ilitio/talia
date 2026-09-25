@@ -1,8 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="${1:?usage: install-agent.sh VERSION [INITIAL_CONFIG]}"
-initial_config="${2:-}"
+version="${1:?usage: install-agent.sh VERSION [--initial-config PATH] [--enable-ebpf]}"
+shift
+initial_config=""
+enable_ebpf=false
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --initial-config)
+      initial_config="${2:?--initial-config requires a path}"
+      shift 2
+      ;;
+    --enable-ebpf)
+      enable_ebpf=true
+      shift
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
 bundle_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 release_directory="/opt/talia/releases/${version}"
 
@@ -24,6 +43,7 @@ install -d -m 0755 /opt/talia/releases /etc/talia
 install -d -m 0750 -o talia -g talia /var/lib/talia
 install -d -m 0755 "$release_directory"
 install -m 0755 "${bundle_directory}/bin/talia-agent" "${release_directory}/talia-agent"
+install -m 0755 "${bundle_directory}/rollback-agent.sh" /opt/talia/rollback-agent.sh
 
 if [[ ! -f /etc/talia/talia-agent.toml ]]; then
   if [[ -z "$initial_config" ]]; then
@@ -50,6 +70,11 @@ mv -Tf /opt/talia/current.next /opt/talia/current
 
 install -m 0644 "${bundle_directory}/systemd/talia-agent.service" \
   /etc/systemd/system/talia-agent.service
+if [[ "$enable_ebpf" == true ]]; then
+  install -d -m 0755 /etc/systemd/system/talia-agent.service.d
+  install -m 0644 "${bundle_directory}/systemd/talia-agent-ebpf.conf" \
+    /etc/systemd/system/talia-agent.service.d/20-ebpf.conf
+fi
 systemctl daemon-reload
 systemctl enable talia-agent.service
 

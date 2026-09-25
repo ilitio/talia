@@ -33,6 +33,8 @@ install -m 0755 target/release/talia-control "$staging_directory/bin/talia-contr
 install -m 0755 scripts/install-agent.sh "$staging_directory/install-agent.sh"
 install -m 0755 scripts/rollback-agent.sh "$staging_directory/rollback-agent.sh"
 install -m 0644 systemd/talia-agent.service "$staging_directory/systemd/talia-agent.service"
+install -m 0644 systemd/talia-agent-ebpf.conf \
+  "$staging_directory/systemd/talia-agent-ebpf.conf"
 install -m 0644 examples/agent.toml "$staging_directory/examples/agent.toml"
 install -m 0644 examples/control.toml "$staging_directory/examples/control.toml"
 install -m 0644 docs/deployment.md "$staging_directory/DEPLOYMENT.md"

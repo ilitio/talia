@@ -332,13 +332,13 @@ standard OTel exporter environment variables such as
 
 ## Privilege Model
 
-The storage MVP does not require root. Run `talia-agent` as a dedicated
-unprivileged user with write access only to its state directory and read access
-to its config/token files.
+The storage and memory collectors do not require root. Run them as the dedicated
+unprivileged `talia` user with write access only to the state directory and read
+access to config and token files.
 
-Future BPF/perf collectors must be enabled by short-lived leases and should use
-the narrowest Linux capabilities that work on the target kernel. Do not make the
-always-on base agent root by default.
+The current eBPF collectors require the optional privilege drop-in packaged with
+each release. Enable it only on reviewed hosts that use CPU, network, or disk I/O
+collection. The base service remains unprivileged by default.
 
 ## mTLS Follow-Up
 
