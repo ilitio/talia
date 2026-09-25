@@ -32,3 +32,9 @@ jobs:
 
       - name: Run tests
         run: cargo test --locked --workspace --all-targets --all-features
+
+      - name: Validate release bundle
+        run: ./scripts/package-release.sh 0.0.0 dist
+
+      - name: Validate deployment scripts
+        run: bash -n scripts/install-agent.sh scripts/rollback-agent.sh
