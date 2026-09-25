@@ -1,6 +1,6 @@
 [package]
 name = "talia-control"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "Remote configuration and control plane for Talia agents"
 license = "MIT OR Apache-2.0"

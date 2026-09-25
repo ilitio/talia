@@ -13,8 +13,8 @@ of publishing an agent with placeholder eBPF objects.
 Create a release from a reviewed commit on `main`:
 
 ```sh
-git tag -a v0.1.1 -m "Talia v0.1.1"
-git push origin v0.1.1
+git tag -a v0.1.2 -m "Talia v0.1.2"
+git push origin v0.1.2
 ```
 
 Update both binary package versions to match the tag before creating it.
@@ -25,16 +25,19 @@ Download the archive and checksum from the matching GitHub release, then verify
 them before extracting:
 
 ```sh
-sha256sum --check talia-0.1.1-x86_64-unknown-linux-gnu.tar.gz.sha256
-tar -xzf talia-0.1.1-x86_64-unknown-linux-gnu.tar.gz
-cd talia-0.1.1-x86_64-unknown-linux-gnu
+sha256sum --check talia-0.1.2-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf talia-0.1.2-x86_64-unknown-linux-gnu.tar.gz
+cd talia-0.1.2-x86_64-unknown-linux-gnu
 ```
 
 For the first managed installation, pass the host's prepared config:
 
 ```sh
-sudo ./install-agent.sh 0.1.1 /secure/path/talia-agent.toml
+sudo ./install-agent.sh 0.1.2 --initial-config /secure/path/talia-agent.toml
 ```
+
+Add `--enable-ebpf` when the CPU, network, or disk I/O collectors are enabled.
+This installs the reviewed systemd privilege drop-in shipped in the release.
 
 Later upgrades preserve `/etc/talia/talia-agent.toml` and the optional
 `/etc/talia/talia-agent.env` secrets file:
@@ -59,7 +62,7 @@ Rollback changes only the binary. It preserves host identity, configuration,
 last-known-good runtime state, and secrets:
 
 ```sh
-sudo ./rollback-agent.sh
+sudo /opt/talia/rollback-agent.sh
 ```
 
 The script restarts and verifies the previous release. If that release fails to
