@@ -1,0 +1,42 @@
+[agents."agent-1"]
+hostname = "prod-vps-1"
+config_token = "replace-with-agent-secret"
+
+[defaults.agent]
+config_poll_interval_seconds = 900
+heartbeat_interval_seconds = 60
+
+[defaults.storage]
+enabled = true
+interval_seconds = 60
+mounts = ["/"]
+
+[defaults.memory]
+enabled = true
+interval_seconds = 60
+
+[defaults.cpu]
+enabled = false
+interval_seconds = 1
+
+[defaults.network]
+enabled = false
+interval_seconds = 1
+
+[defaults.disk_io]
+enabled = false
+interval_seconds = 1
+
+# Example host-specific override for a container host. This still monitors host
+# filesystems only; container runtime storage metrics are a later collector.
+[hosts."prod-vps-1".storage]
+mounts = ["/", "/var/lib/docker"]
+
+[hosts."prod-vps-1".cpu]
+enabled = true
+
+[hosts."prod-vps-1".network]
+enabled = true
+
+[hosts."prod-vps-1".disk_io]
+enabled = true

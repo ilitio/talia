@@ -1,0 +1,38 @@
+control_http_url = "http://127.0.0.1:3501"
+control_ws_url = "ws://127.0.0.1:3501/agent/control"
+# Set to true only for private internal http/ws control-plane deployments.
+allow_insecure_control_url = false
+otlp_endpoint = "http://127.0.0.1:4317"
+state_dir = "/var/lib/talia"
+
+# Prefer TALIA_CONTROL_TOKEN or a root-readable environment file in deployment.
+# control_token = "replace-with-local-dev-token"
+
+# Required for host-specific remote config overrides.
+# Prefer TALIA_AGENT_CONFIG_TOKEN or a root-readable environment file in deployment.
+# agent_config_token = "replace-with-agent-secret"
+
+[agent]
+config_poll_interval_seconds = 900
+heartbeat_interval_seconds = 60
+
+[storage]
+enabled = true
+interval_seconds = 60
+mounts = ["/"]
+
+[memory]
+enabled = true
+interval_seconds = 60
+
+[cpu]
+enabled = false
+interval_seconds = 1
+
+[network]
+enabled = false
+interval_seconds = 1
+
+[disk_io]
+enabled = false
+interval_seconds = 1
