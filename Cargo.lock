@@ -1645,7 +1645,7 @@ dependencies = [
 
 [[package]]
 name = "talia-agent"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "aya",
@@ -1669,7 +1669,7 @@ dependencies = [
 
 [[package]]
 name = "talia-control"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1689,7 +1689,7 @@ dependencies = [
 
 [[package]]
 name = "talia-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",

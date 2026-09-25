@@ -42,5 +42,7 @@ printf '%s\n' "$version" > "$staging_directory/VERSION"
 
 mkdir -p "$output_directory"
 tar -C "$output_directory" -czf "${output_directory}/${bundle}.tar.gz" "$bundle"
-sha256sum "${output_directory}/${bundle}.tar.gz" \
-  > "${output_directory}/${bundle}.tar.gz.sha256"
+(
+  cd "$output_directory"
+  sha256sum "${bundle}.tar.gz" > "${bundle}.tar.gz.sha256"
+)
