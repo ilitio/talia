@@ -30,6 +30,9 @@ the WebSocket protocol.
 - `talia-agent`: Linux-only host agent
 - `talia-control`: minimal config/control server
 
+Versioned release bundles, systemd deployment, staged rollout, and rollback are
+documented in [Release, deployment, and rollback](docs/deployment.md).
+
 Run the control server:
 
 ```sh
