@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = [
+    "talia-agent",
+    "talia-control",
+    "talia-core",
+]
+
+[workspace.dependencies]
+uuid = "1.23.1"
+
+[workspace.lints.rust]
+missing_docs = "deny"
+warnings = "deny"
+rust_2018_idioms = "deny"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+bare_urls = "deny"

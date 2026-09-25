@@ -1,0 +1,32 @@
+[package]
+name = "talia-agent"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+description = "Linux host monitoring agent that exports OpenTelemetry metrics"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anyhow = "1.0.100"
+clap = { version = "4.6.1", features = ["derive", "env"] }
+futures-util = "0.3.32"
+opentelemetry = "0.33"
+opentelemetry-otlp = { version = "0.33", features = ["grpc-tonic", "metrics"] }
+opentelemetry_sdk = { version = "0.33", features = ["metrics", "rt-tokio"] }
+reqwest = { version = "0.12.26", default-features = false, features = ["json", "rustls-tls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+rustix = { version = "1.1.4", features = ["event", "fs", "param", "system"] }
+serde_json = "1.0.145"
+talia-core = { path = "../talia-core" }
+thiserror = "2.0.17"
+tokio = { version = "1.52.3", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["fmt", "env-filter"] }
+uuid = { workspace = true, features = ["v4"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+aya = "0.13.1"
+
+[lints]
+workspace = true
