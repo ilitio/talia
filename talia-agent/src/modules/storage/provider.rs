@@ -5,10 +5,10 @@ use std::time::SystemTime;
 
 use crate::modules::storage::filesystem::FilesystemSample;
 use crate::modules::storage::filesystem::collect_filesystems;
-use crate::pipeline::Provider;
-use crate::pipeline::ProviderError;
-use crate::pipeline::Sample;
-use crate::pipeline::SampleValue;
+use talia_core::pipeline::Provider;
+use talia_core::pipeline::ProviderError;
+use talia_core::pipeline::Sample;
+use talia_core::pipeline::SampleValue;
 
 /// Sample name for total filesystem capacity in bytes.
 pub const FILESYSTEM_LIMIT_SAMPLE: &str = "system.filesystem.limit";
