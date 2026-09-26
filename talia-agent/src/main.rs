@@ -22,6 +22,7 @@ use futures_util::StreamExt;
 use reqwest::StatusCode;
 use talia_agent::identity;
 use talia_agent::identity::AgentIdentity;
+use talia_agent::processors::NameFilter;
 use talia_agent::runner;
 use talia_agent::sinks::OtlpSink;
 use talia_agent::sinks::StdoutSink;
@@ -32,7 +33,9 @@ use talia_core::control::AGENT_ID_HEADER;
 use talia_core::control::AgentControlMessage;
 use talia_core::control::CONFIG_SESSION_ID_HEADER;
 use talia_core::control::ServerControlMessage;
+use talia_core::pipeline::Processor;
 use talia_core::pipeline::Sink;
+use talia_core::pipeline::process_sample;
 use tokio::sync::RwLock;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
@@ -73,6 +76,10 @@ enum Command {
         /// Collection interval, e.g. `5s`.
         #[arg(long, default_value = "5s", value_parser = humantime::parse_duration)]
         interval: Duration,
+        /// Only keep samples whose name starts with one of these prefixes.
+        /// Repeatable, e.g. `--keep system.cpu. --keep system.memory.`.
+        #[arg(long)]
+        keep: Vec<String>,
     },
     /// Load a provider and run one collection, reporting success or failure.
     Check {
@@ -126,8 +133,9 @@ async fn run() -> Result<()> {
             provider,
             r#for,
             interval,
+            keep,
         }) => {
-            return query_provider(provider, *r#for, *interval).await;
+            return query_provider(provider, *r#for, *interval, keep.clone()).await;
         },
         Some(Command::Check { provider }) => {
             return check_provider(provider).await;
@@ -203,9 +211,13 @@ async fn run() -> Result<()> {
     }
 
     let sinks: Vec<Arc<dyn Sink>> = vec![sink];
+    // No processors are configured yet; the pipeline still runs every sample
+    // through the (empty) processor chain.
+    let processors: Vec<Arc<dyn Processor>> = Vec::new();
     for spec in runner::collector_specs() {
         tokio::spawn(runner::run_collector(
             spec,
+            processors.clone(),
             sinks.clone(),
             Arc::clone(&shared_config),
         ));
@@ -550,10 +562,20 @@ fn collector_spec(name: &str) -> Result<runner::CollectorSpec> {
 
 /// Collects one provider's samples to stdout for the given duration,
 /// bpftrace-style.
-async fn query_provider(name: &str, duration: Duration, interval: Duration) -> Result<()> {
+async fn query_provider(
+    name: &str,
+    duration: Duration,
+    interval: Duration,
+    keep: Vec<String>,
+) -> Result<()> {
     let mut spec = collector_spec(name)?;
     let mut provider =
         (spec.factory)(interval).with_context(|| format!("failed to load provider '{name}'"))?;
+    let processors: Vec<Arc<dyn Processor>> = if keep.is_empty() {
+        Vec::new()
+    } else {
+        vec![Arc::new(NameFilter::new(keep))]
+    };
     let sink = StdoutSink::new();
     let start = std::time::Instant::now();
     loop {
@@ -563,8 +585,10 @@ async fn query_provider(name: &str, duration: Duration, interval: Duration) -> R
         provider.set_window(interval);
         match provider.collect() {
             Ok(samples) => {
-                for sample in &samples {
-                    sink.emit(sample, "query");
+                for sample in samples {
+                    if let Some(sample) = process_sample(&processors, sample) {
+                        sink.emit(&sample, "query");
+                    }
                 }
             },
             Err(error) => {
