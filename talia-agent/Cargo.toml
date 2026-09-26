@@ -10,6 +10,7 @@ license = "MIT OR Apache-2.0"
 anyhow = "1.0.100"
 clap = { version = "4.6.1", features = ["derive", "env"] }
 futures-util = "0.3.32"
+humantime = "2.3"
 opentelemetry = "0.33"
 opentelemetry-otlp = { version = "0.33", features = ["grpc-tonic", "metrics"] }
 opentelemetry_sdk = { version = "0.33", features = ["metrics", "rt-tokio"] }
