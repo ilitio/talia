@@ -15,6 +15,17 @@ use uuid::Uuid;
 const AGENT_ID_FILE: &str = "agent-id";
 const BOOT_ID_PATH: &str = "/proc/sys/kernel/random/boot_id";
 
+/// Identifies one running Talia agent instance to the fleet.
+#[derive(Clone)]
+pub struct AgentIdentity {
+    /// Stable agent id persisted under the state directory.
+    pub agent_id: String,
+    /// Kernel hostname of the monitored host.
+    pub hostname: String,
+    /// Linux boot id, when readable.
+    pub boot_id: Option<String>,
+}
+
 /// Errors returned while loading or creating a persistent Talia agent identity.
 #[derive(Debug, Error)]
 pub enum IdentityError {

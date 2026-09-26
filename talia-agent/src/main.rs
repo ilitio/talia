@@ -18,36 +18,15 @@ use anyhow::Result;
 use clap::Parser;
 use futures_util::SinkExt;
 use futures_util::StreamExt;
-use opentelemetry::KeyValue;
-use opentelemetry::metrics::Counter;
-use opentelemetry::metrics::Gauge;
-use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_sdk::metrics::Temporality;
 use reqwest::StatusCode;
 use talia_agent::identity;
-use talia_agent::modules::cpu::CPU_UTILIZATION_SAMPLE;
+use talia_agent::identity::AgentIdentity;
 use talia_agent::modules::cpu::CpuProvider;
-use talia_agent::modules::disk_io::DISK_ERRORS_SAMPLE;
-use talia_agent::modules::disk_io::DISK_IN_FLIGHT_BYTES_SAMPLE;
-use talia_agent::modules::disk_io::DISK_IO_SAMPLE;
-use talia_agent::modules::disk_io::DISK_LATENCY_SAMPLE;
-use talia_agent::modules::disk_io::DISK_OPERATIONS_SAMPLE;
-use talia_agent::modules::disk_io::DISK_QUEUE_DEPTH_SAMPLE;
 use talia_agent::modules::disk_io::DiskIoProvider;
-use talia_agent::modules::memory::MEMORY_USAGE_SAMPLE;
-use talia_agent::modules::memory::MEMORY_UTILIZATION_SAMPLE;
 use talia_agent::modules::memory::MemoryProvider;
-use talia_agent::modules::memory::SWAP_IO_SAMPLE;
-use talia_agent::modules::memory::SWAP_USAGE_SAMPLE;
-use talia_agent::modules::memory::SWAP_UTILIZATION_SAMPLE;
-use talia_agent::modules::network::NETWORK_IO_SAMPLE;
 use talia_agent::modules::network::NetworkProvider;
-use talia_agent::modules::storage::FILESYSTEM_LIMIT_SAMPLE;
-use talia_agent::modules::storage::FILESYSTEM_USAGE_SAMPLE;
-use talia_agent::modules::storage::FILESYSTEM_UTILIZATION_SAMPLE;
 use talia_agent::modules::storage::StorageProvider;
+use talia_agent::sinks::OtlpSink;
 use talia_core::config::AgentBootstrapConfig;
 use talia_core::config::AgentRuntimeConfig;
 use talia_core::control::AGENT_CONFIG_TOKEN_HEADER;
@@ -56,8 +35,7 @@ use talia_core::control::AgentControlMessage;
 use talia_core::control::CONFIG_SESSION_ID_HEADER;
 use talia_core::control::ServerControlMessage;
 use talia_core::pipeline::Provider;
-use talia_core::pipeline::Sample;
-use talia_core::pipeline::SampleValue;
+use talia_core::pipeline::Sink;
 use tokio::sync::RwLock;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
@@ -67,9 +45,6 @@ use tracing_subscriber::EnvFilter;
 
 const AGENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const LAST_KNOWN_CONFIG_FILE: &str = "last-config.json";
-const SERVICE_NAME: &str = "talia-agent";
-const SERVICE_NAMESPACE: &str = "talia";
-const CONFIG_VERSION_ATTRIBUTE: &str = "talia.config.version";
 
 #[derive(Parser)]
 #[command(about = "Talia host monitoring agent")]
@@ -81,13 +56,6 @@ struct Args {
 }
 
 #[derive(Clone)]
-struct AgentIdentity {
-    agent_id: String,
-    hostname: String,
-    boot_id: Option<String>,
-}
-
-#[derive(Clone)]
 struct ControlClientConfig {
     http_url: String,
     ws_url: String,
@@ -96,208 +64,6 @@ struct ControlClientConfig {
 }
 
 type ConfigSessionId = Arc<RwLock<Option<String>>>;
-
-struct Metrics {
-    _provider: SdkMeterProvider,
-    filesystem_usage: Gauge<u64>,
-    filesystem_limit: Gauge<u64>,
-    filesystem_utilization: Gauge<f64>,
-    memory_usage: Gauge<u64>,
-    memory_utilization: Gauge<f64>,
-    swap_usage: Gauge<u64>,
-    swap_utilization: Gauge<f64>,
-    swap_io: Counter<u64>,
-    cpu_utilization: Gauge<f64>,
-    network_io: Counter<u64>,
-    disk_io: Counter<u64>,
-    disk_operations: Counter<u64>,
-    disk_errors: Counter<u64>,
-    disk_latency: Gauge<f64>,
-    disk_queue_depth: Gauge<i64>,
-    disk_in_flight_bytes: Gauge<i64>,
-}
-
-impl Metrics {
-    fn new(otlp_endpoint: &str, identity: &AgentIdentity) -> Result<Self> {
-        let exporter = opentelemetry_otlp::MetricExporter::builder()
-            .with_tonic()
-            .with_endpoint(otlp_endpoint.to_string())
-            .with_temporality(Temporality::Cumulative)
-            .build()
-            .context("failed to build OTLP metric exporter")?;
-        let resource = metrics_resource(identity);
-        let provider = SdkMeterProvider::builder()
-            .with_resource(resource)
-            .with_periodic_exporter(exporter)
-            .build();
-        opentelemetry::global::set_meter_provider(provider.clone());
-        let meter = opentelemetry::global::meter("talia");
-        Ok(Self {
-            _provider: provider,
-            filesystem_usage: meter
-                .u64_gauge("system.filesystem.usage")
-                .with_unit("By")
-                .with_description("Filesystem bytes by state.")
-                .build(),
-            filesystem_limit: meter
-                .u64_gauge("system.filesystem.limit")
-                .with_unit("By")
-                .with_description("Total filesystem capacity.")
-                .build(),
-            filesystem_utilization: meter
-                .f64_gauge("system.filesystem.utilization")
-                .with_unit("1")
-                .with_description("Fraction of filesystem bytes used.")
-                .build(),
-            memory_usage: meter
-                .u64_gauge("system.memory.usage")
-                .with_unit("By")
-                .with_description("Host memory bytes by state.")
-                .build(),
-            memory_utilization: meter
-                .f64_gauge("system.memory.utilization")
-                .with_unit("1")
-                .with_description("Fraction of host memory that is not available.")
-                .build(),
-            swap_usage: meter
-                .u64_gauge("system.linux.memory.swap.usage")
-                .with_unit("By")
-                .with_description("Host swap bytes by state.")
-                .build(),
-            swap_utilization: meter
-                .f64_gauge("system.linux.memory.swap.utilization")
-                .with_unit("1")
-                .with_description("Fraction of host swap currently used.")
-                .build(),
-            swap_io: meter
-                .u64_counter("system.linux.memory.swap.io")
-                .with_unit("By")
-                .with_description("Host swap bytes moved in or out during the interval.")
-                .build(),
-            cpu_utilization: meter
-                .f64_gauge("system.cpu.utilization")
-                .with_unit("1")
-                .with_description(
-                    "Per-CPU utilization ratios from Talia eBPF scheduler accounting.",
-                )
-                .build(),
-            network_io: meter
-                .u64_counter("system.network.io")
-                .with_unit("By")
-                .with_description("Host-wide network bytes from Talia eBPF packet accounting.")
-                .build(),
-            disk_io: meter
-                .u64_counter("system.disk.io")
-                .with_unit("By")
-                .with_description("Host-wide disk I/O bytes from Talia eBPF block accounting.")
-                .build(),
-            disk_operations: meter
-                .u64_counter("system.disk.operations")
-                .with_unit("{operation}")
-                .with_description("Host-wide disk I/O operations from Talia eBPF block accounting.")
-                .build(),
-            disk_errors: meter
-                .u64_counter("system.disk.errors")
-                .with_unit("{error}")
-                .with_description("Host-wide disk I/O errors from Talia eBPF block accounting.")
-                .build(),
-            disk_latency: meter
-                .f64_gauge("system.disk.io.latency")
-                .with_unit("ms")
-                .with_description("Average disk I/O issue-to-completion latency.")
-                .build(),
-            disk_queue_depth: meter
-                .i64_gauge("system.disk.io.queue_depth")
-                .with_unit("{operation}")
-                .with_description("Current in-flight disk I/O operations.")
-                .build(),
-            disk_in_flight_bytes: meter
-                .i64_gauge("system.disk.io.in_flight")
-                .with_unit("By")
-                .with_description("Current in-flight disk I/O bytes.")
-                .build(),
-        })
-    }
-
-    /// Records one neutral pipeline [`Sample`] into the OTLP instruments.
-    ///
-    /// The config version attribute is attached here so providers stay
-    /// transport-agnostic.
-    fn record_sample(&self, config_version: &str, sample: &Sample) {
-        let attributes = sample_attributes(config_version, sample);
-        match (sample.name.as_str(), sample.value) {
-            (FILESYSTEM_LIMIT_SAMPLE, SampleValue::GaugeU64(bytes)) => {
-                self.filesystem_limit.record(bytes, &attributes);
-            },
-            (FILESYSTEM_USAGE_SAMPLE, SampleValue::GaugeU64(bytes)) => {
-                self.filesystem_usage.record(bytes, &attributes);
-            },
-            (FILESYSTEM_UTILIZATION_SAMPLE, SampleValue::GaugeF64(ratio)) => {
-                self.filesystem_utilization.record(ratio, &attributes);
-            },
-            (MEMORY_USAGE_SAMPLE, SampleValue::GaugeU64(bytes)) => {
-                self.memory_usage.record(bytes, &attributes);
-            },
-            (MEMORY_UTILIZATION_SAMPLE, SampleValue::GaugeF64(ratio)) => {
-                self.memory_utilization.record(ratio, &attributes);
-            },
-            (SWAP_USAGE_SAMPLE, SampleValue::GaugeU64(bytes)) => {
-                self.swap_usage.record(bytes, &attributes);
-            },
-            (SWAP_UTILIZATION_SAMPLE, SampleValue::GaugeF64(ratio)) => {
-                self.swap_utilization.record(ratio, &attributes);
-            },
-            (SWAP_IO_SAMPLE, SampleValue::Counter(bytes)) => {
-                self.swap_io.add(bytes, &attributes);
-            },
-            (CPU_UTILIZATION_SAMPLE, SampleValue::GaugeF64(ratio)) => {
-                self.cpu_utilization.record(ratio, &attributes);
-            },
-            (NETWORK_IO_SAMPLE, SampleValue::Counter(bytes)) => {
-                self.network_io.add(bytes, &attributes);
-            },
-            (DISK_IO_SAMPLE, SampleValue::Counter(bytes)) => {
-                self.disk_io.add(bytes, &attributes);
-            },
-            (DISK_OPERATIONS_SAMPLE, SampleValue::Counter(operations)) => {
-                self.disk_operations.add(operations, &attributes);
-            },
-            (DISK_ERRORS_SAMPLE, SampleValue::Counter(errors)) => {
-                self.disk_errors.add(errors, &attributes);
-            },
-            (DISK_LATENCY_SAMPLE, SampleValue::GaugeF64(latency_ms)) => {
-                self.disk_latency.record(latency_ms, &attributes);
-            },
-            (DISK_QUEUE_DEPTH_SAMPLE, SampleValue::GaugeI64(operations)) => {
-                self.disk_queue_depth.record(operations, &attributes);
-            },
-            (DISK_IN_FLIGHT_BYTES_SAMPLE, SampleValue::GaugeI64(bytes)) => {
-                self.disk_in_flight_bytes.record(bytes, &attributes);
-            },
-            (name, _) => {
-                tracing::warn!(sample_name = %name, "talia_unknown_sample_dropped");
-            },
-        }
-    }
-}
-
-fn metrics_resource(identity: &AgentIdentity) -> Resource {
-    Resource::builder()
-        .with_service_name(SERVICE_NAME)
-        .with_attributes([
-            KeyValue::new("service.namespace", SERVICE_NAMESPACE),
-            KeyValue::new("service.version", AGENT_VERSION),
-            KeyValue::new("host.name", identity.hostname.clone()),
-        ])
-        .build()
-}
-
-impl Drop for Metrics {
-    fn drop(&mut self) {
-        let _ = self._provider.force_flush();
-        let _ = self._provider.shutdown();
-    }
-}
 
 #[tokio::main]
 async fn main() {
@@ -346,7 +112,7 @@ async fn run() -> Result<()> {
         .context("initial runtime config is invalid")?;
     let shared_config = Arc::new(RwLock::new(runtime_config));
     let config_session_id = Arc::new(RwLock::new(None));
-    let metrics = Arc::new(Metrics::new(&bootstrap.otlp_endpoint, &identity)?);
+    let sink: Arc<dyn Sink> = Arc::new(OtlpSink::new(&bootstrap.otlp_endpoint, &identity)?);
     let http_client = reqwest::Client::new();
 
     let control = bootstrap
@@ -381,22 +147,13 @@ async fn run() -> Result<()> {
         tracing::warn!("talia_control_token_missing_using_local_config_only");
     }
 
-    tokio::spawn(cpu_loop(Arc::clone(&shared_config), Arc::clone(&metrics)));
-    tokio::spawn(network_loop(
-        Arc::clone(&shared_config),
-        Arc::clone(&metrics),
-    ));
-    tokio::spawn(disk_io_loop(
-        Arc::clone(&shared_config),
-        Arc::clone(&metrics),
-    ));
-    tokio::spawn(memory_loop(
-        Arc::clone(&shared_config),
-        Arc::clone(&metrics),
-    ));
+    tokio::spawn(cpu_loop(Arc::clone(&shared_config), Arc::clone(&sink)));
+    tokio::spawn(network_loop(Arc::clone(&shared_config), Arc::clone(&sink)));
+    tokio::spawn(disk_io_loop(Arc::clone(&shared_config), Arc::clone(&sink)));
+    tokio::spawn(memory_loop(Arc::clone(&shared_config), Arc::clone(&sink)));
 
     tokio::select! {
-        result = storage_loop(Arc::clone(&shared_config), Arc::clone(&metrics)) => result,
+        result = storage_loop(Arc::clone(&shared_config), Arc::clone(&sink)) => result,
         signal = tokio::signal::ctrl_c() => {
             signal.context("failed to listen for shutdown signal")?;
             tracing::info!("talia_agent_shutdown_signal");
@@ -407,7 +164,7 @@ async fn run() -> Result<()> {
 
 async fn memory_loop(
     shared_config: Arc<RwLock<AgentRuntimeConfig>>,
-    metrics: Arc<Metrics>,
+    sink: Arc<dyn Sink>,
 ) -> Result<()> {
     let mut provider: Box<dyn Provider> = Box::new(MemoryProvider::new());
     loop {
@@ -416,7 +173,7 @@ async fn memory_loop(
             match provider.collect() {
                 Ok(samples) => {
                     for sample in &samples {
-                        metrics.record_sample(&config.version, sample);
+                        sink.emit(sample, &config.version);
                     }
                     tracing::info!(
                         config_version = %config.version,
@@ -433,7 +190,7 @@ async fn memory_loop(
     }
 }
 
-async fn disk_io_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: Arc<Metrics>) {
+async fn disk_io_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, sink: Arc<dyn Sink>) {
     let mut provider: Option<DiskIoProvider> = None;
     let mut disabled_logged = false;
 
@@ -475,7 +232,7 @@ async fn disk_io_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: A
         match provider.collect() {
             Ok(samples) => {
                 for sample in &samples {
-                    metrics.record_sample(&config.version, sample);
+                    sink.emit(sample, &config.version);
                 }
                 tracing::debug!(sample_count = samples.len(), "talia_disk_io_collected");
             },
@@ -486,7 +243,7 @@ async fn disk_io_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: A
     }
 }
 
-async fn network_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: Arc<Metrics>) {
+async fn network_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, sink: Arc<dyn Sink>) {
     let mut provider: Option<NetworkProvider> = None;
     let mut disabled_logged = false;
 
@@ -528,7 +285,7 @@ async fn network_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: A
         match provider.collect() {
             Ok(samples) => {
                 for sample in &samples {
-                    metrics.record_sample(&config.version, sample);
+                    sink.emit(sample, &config.version);
                 }
                 tracing::debug!(sample_count = samples.len(), "talia_network_collected");
             },
@@ -539,7 +296,7 @@ async fn network_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: A
     }
 }
 
-async fn cpu_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: Arc<Metrics>) {
+async fn cpu_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, sink: Arc<dyn Sink>) {
     let mut provider: Option<CpuProvider> = None;
     let mut disabled_logged = false;
 
@@ -581,7 +338,7 @@ async fn cpu_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: Arc<M
         match provider.collect() {
             Ok(samples) => {
                 for sample in &samples {
-                    metrics.record_sample(&config.version, sample);
+                    sink.emit(sample, &config.version);
                 }
                 tracing::debug!(sample_count = samples.len(), "talia_cpu_collected");
             },
@@ -594,7 +351,7 @@ async fn cpu_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: Arc<M
 
 async fn storage_loop(
     shared_config: Arc<RwLock<AgentRuntimeConfig>>,
-    metrics: Arc<Metrics>,
+    sink: Arc<dyn Sink>,
 ) -> Result<()> {
     let mut provider: Box<dyn Provider> = Box::new(StorageProvider::new(Vec::new()));
     let mut configured_mounts: Vec<String> = Vec::new();
@@ -608,7 +365,7 @@ async fn storage_loop(
             match provider.collect() {
                 Ok(samples) => {
                     for sample in &samples {
-                        metrics.record_sample(&config.version, sample);
+                        sink.emit(sample, &config.version);
                     }
                     tracing::info!(
                         config_version = %config.version,
@@ -930,22 +687,6 @@ async fn fetch_remote_config(
         .context("failed to decode control config response")
 }
 
-/// Builds the OTLP attributes for one neutral pipeline [`Sample`]: the
-/// sample's own dimensions plus Talia's config version, so providers stay
-/// transport-agnostic.
-fn sample_attributes(config_version: &str, sample: &Sample) -> Vec<KeyValue> {
-    let mut attributes: Vec<KeyValue> = sample
-        .attributes
-        .iter()
-        .map(|(key, value)| KeyValue::new(key.clone(), value.clone()))
-        .collect();
-    attributes.push(KeyValue::new(
-        CONFIG_VERSION_ATTRIBUTE,
-        config_version.to_string(),
-    ));
-    attributes
-}
-
 fn enabled_collectors(config: &AgentRuntimeConfig) -> Vec<String> {
     let mut collectors = Vec::new();
     if config.storage.enabled {
@@ -1018,66 +759,6 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn metrics_resource_identifies_the_talia_service() {
-        // Given: a Talia agent running on a named fleet host.
-        let identity = AgentIdentity {
-            agent_id: "agent-1".to_string(),
-            hostname: "host-1".to_string(),
-            boot_id: None,
-        };
-
-        // When: the agent builds the resource attached to every metric.
-        let resource = metrics_resource(&identity);
-
-        // Then: standard OTel attributes identify the service and its namespace.
-        assert_eq!(
-            resource
-                .get(&opentelemetry::Key::new("service.name"))
-                .map(|value| value.to_string()),
-            Some("talia-agent".to_string())
-        );
-        assert_eq!(
-            resource
-                .get(&opentelemetry::Key::new("service.namespace"))
-                .map(|value| value.to_string()),
-            Some("talia".to_string())
-        );
-        assert_eq!(
-            resource
-                .get(&opentelemetry::Key::new("host.name"))
-                .map(|value| value.to_string()),
-            Some("host-1".to_string())
-        );
-    }
-
-    #[test]
-    fn metric_attributes_use_the_talia_config_version_key() {
-        // Given: a runtime configuration version and a pipeline sample.
-        let config_version = "config-v1";
-        let sample = Sample {
-            name: MEMORY_USAGE_SAMPLE.to_string(),
-            value: SampleValue::GaugeU64(42),
-            attributes: std::collections::BTreeMap::from([(
-                "system.memory.state".to_string(),
-                "used".to_string(),
-            )]),
-            timestamp: std::time::SystemTime::now(),
-        };
-
-        // When: the agent builds the OTLP attributes for the sample.
-        let attributes = sample_attributes(config_version, &sample);
-
-        // Then: the sample dimensions are kept and Talia's neutral config
-        // version key is attached.
-        assert_eq!(attributes.len(), 2);
-        let version = attributes
-            .iter()
-            .find(|attribute| attribute.key.as_str() == "talia.config.version")
-            .expect("config version attribute present");
-        assert_eq!(version.value.to_string(), config_version);
-    }
 
     #[test]
     fn agent_cli_does_not_accept_secret_flags() {
