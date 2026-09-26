@@ -49,16 +49,16 @@ impl DiskIoProvider {
             .map(|collector| Self { collector, window })
             .map_err(|source| ProviderError::new("disk_io", source))
     }
-
-    /// Updates the sampling window, e.g. after a config change.
-    pub fn set_window(&mut self, window: Duration) {
-        self.window = window;
-    }
 }
 
 impl Provider for DiskIoProvider {
     fn name(&self) -> &'static str {
         "disk_io"
+    }
+
+    /// Updates the sampling window, e.g. after a config change.
+    fn set_window(&mut self, window: Duration) {
+        self.window = window;
     }
 
     fn collect(&mut self) -> Result<Vec<Sample>, ProviderError> {

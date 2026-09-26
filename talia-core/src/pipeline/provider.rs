@@ -1,6 +1,10 @@
 //! Provider plugin trait and error type.
 
+use std::time::Duration;
+
 use thiserror::Error;
+
+use crate::config::AgentRuntimeConfig;
 
 use super::sample::Sample;
 
@@ -39,6 +43,21 @@ pub trait Provider: Send {
 
     /// Collects one batch of samples. Called once per collection interval.
     fn collect(&mut self) -> Result<Vec<Sample>, ProviderError>;
+
+    /// Updates the collection window before a collection. Default is a no-op.
+    ///
+    /// eBPF providers use the window to scale their per-interval accounting.
+    fn set_window(&mut self, window: Duration) {
+        let _ = window;
+    }
+
+    /// Applies runtime config changes before a collection. Default is a no-op.
+    ///
+    /// Lets providers react to config reloads without being rebuilt, e.g.
+    /// the storage provider watching its mount list.
+    fn reconfigure(&mut self, config: &AgentRuntimeConfig) {
+        let _ = config;
+    }
 }
 
 #[cfg(test)]

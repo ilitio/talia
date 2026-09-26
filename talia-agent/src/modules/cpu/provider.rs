@@ -39,16 +39,16 @@ impl CpuProvider {
             .map(|collector| Self { collector, window })
             .map_err(|source| ProviderError::new("cpu", source))
     }
-
-    /// Updates the sampling window, e.g. after a config change.
-    pub fn set_window(&mut self, window: Duration) {
-        self.window = window;
-    }
 }
 
 impl Provider for CpuProvider {
     fn name(&self) -> &'static str {
         "cpu"
+    }
+
+    /// Updates the sampling window, e.g. after a config change.
+    fn set_window(&mut self, window: Duration) {
+        self.window = window;
     }
 
     fn collect(&mut self) -> Result<Vec<Sample>, ProviderError> {

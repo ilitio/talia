@@ -10,4 +10,6 @@ pub mod identity;
 #[cfg(target_os = "linux")]
 pub mod modules;
 #[cfg(target_os = "linux")]
+pub mod runner;
+#[cfg(target_os = "linux")]
 pub mod sinks;

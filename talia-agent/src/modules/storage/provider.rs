@@ -5,6 +5,7 @@ use std::time::SystemTime;
 
 use crate::modules::storage::filesystem::FilesystemSample;
 use crate::modules::storage::filesystem::collect_filesystems;
+use talia_core::config::AgentRuntimeConfig;
 use talia_core::pipeline::Provider;
 use talia_core::pipeline::ProviderError;
 use talia_core::pipeline::Sample;
@@ -48,6 +49,13 @@ impl Provider for StorageProvider {
         collect_filesystems(&self.mounts)
             .map(|samples| samples.iter().flat_map(filesystem_samples).collect())
             .map_err(|source| ProviderError::new(self.name(), source))
+    }
+
+    /// Picks up mount list changes without rebuilding the provider.
+    fn reconfigure(&mut self, config: &AgentRuntimeConfig) {
+        if self.mounts != config.storage.mounts {
+            self.mounts = config.storage.mounts.clone();
+        }
     }
 }
 

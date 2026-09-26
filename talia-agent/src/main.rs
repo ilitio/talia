@@ -21,11 +21,7 @@ use futures_util::StreamExt;
 use reqwest::StatusCode;
 use talia_agent::identity;
 use talia_agent::identity::AgentIdentity;
-use talia_agent::modules::cpu::CpuProvider;
-use talia_agent::modules::disk_io::DiskIoProvider;
-use talia_agent::modules::memory::MemoryProvider;
-use talia_agent::modules::network::NetworkProvider;
-use talia_agent::modules::storage::StorageProvider;
+use talia_agent::runner;
 use talia_agent::sinks::OtlpSink;
 use talia_core::config::AgentBootstrapConfig;
 use talia_core::config::AgentRuntimeConfig;
@@ -34,7 +30,6 @@ use talia_core::control::AGENT_ID_HEADER;
 use talia_core::control::AgentControlMessage;
 use talia_core::control::CONFIG_SESSION_ID_HEADER;
 use talia_core::control::ServerControlMessage;
-use talia_core::pipeline::Provider;
 use talia_core::pipeline::Sink;
 use tokio::sync::RwLock;
 use tokio_tungstenite::connect_async;
@@ -147,239 +142,20 @@ async fn run() -> Result<()> {
         tracing::warn!("talia_control_token_missing_using_local_config_only");
     }
 
-    tokio::spawn(cpu_loop(Arc::clone(&shared_config), Arc::clone(&sink)));
-    tokio::spawn(network_loop(Arc::clone(&shared_config), Arc::clone(&sink)));
-    tokio::spawn(disk_io_loop(Arc::clone(&shared_config), Arc::clone(&sink)));
-    tokio::spawn(memory_loop(Arc::clone(&shared_config), Arc::clone(&sink)));
-
-    tokio::select! {
-        result = storage_loop(Arc::clone(&shared_config), Arc::clone(&sink)) => result,
-        signal = tokio::signal::ctrl_c() => {
-            signal.context("failed to listen for shutdown signal")?;
-            tracing::info!("talia_agent_shutdown_signal");
-            Ok(())
-        }
+    let sinks: Vec<Arc<dyn Sink>> = vec![sink];
+    for spec in runner::collector_specs() {
+        tokio::spawn(runner::run_collector(
+            spec,
+            sinks.clone(),
+            Arc::clone(&shared_config),
+        ));
     }
-}
 
-async fn memory_loop(
-    shared_config: Arc<RwLock<AgentRuntimeConfig>>,
-    sink: Arc<dyn Sink>,
-) -> Result<()> {
-    let mut provider: Box<dyn Provider> = Box::new(MemoryProvider::new());
-    loop {
-        let config = shared_config.read().await.clone();
-        if config.memory.enabled {
-            match provider.collect() {
-                Ok(samples) => {
-                    for sample in &samples {
-                        sink.emit(sample, &config.version);
-                    }
-                    tracing::info!(
-                        config_version = %config.version,
-                        sample_count = samples.len(),
-                        "talia_memory_collected"
-                    );
-                },
-                Err(error) => {
-                    tracing::warn!(error = %error, "talia_memory_collection_failed");
-                },
-            }
-        }
-        tokio::time::sleep(Duration::from_secs(config.memory.interval_seconds)).await;
-    }
-}
-
-async fn disk_io_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, sink: Arc<dyn Sink>) {
-    let mut provider: Option<DiskIoProvider> = None;
-    let mut disabled_logged = false;
-
-    loop {
-        let config = shared_config.read().await.clone();
-        let interval = Duration::from_secs(config.disk_io.interval_seconds);
-        if !config.disk_io.enabled {
-            if provider.take().is_some() {
-                tracing::info!("talia_disk_io_collector_stopped");
-            }
-            if !disabled_logged {
-                tracing::info!("talia_disk_io_collector_disabled");
-                disabled_logged = true;
-            }
-            tokio::time::sleep(interval).await;
-            continue;
-        }
-        disabled_logged = false;
-        if provider.is_none() {
-            tracing::info!("talia_disk_io_collector_starting");
-            match DiskIoProvider::load(interval) {
-                Ok(loaded) => {
-                    provider = Some(loaded);
-                    tracing::info!("talia_disk_io_collector_started");
-                },
-                Err(error) => {
-                    tracing::warn!(error = %error, "talia_disk_io_collector_start_failed");
-                    tokio::time::sleep(interval).await;
-                    continue;
-                },
-            }
-        }
-
-        tokio::time::sleep(interval).await;
-        let Some(provider) = provider.as_mut() else {
-            continue;
-        };
-        provider.set_window(interval);
-        match provider.collect() {
-            Ok(samples) => {
-                for sample in &samples {
-                    sink.emit(sample, &config.version);
-                }
-                tracing::debug!(sample_count = samples.len(), "talia_disk_io_collected");
-            },
-            Err(error) => {
-                tracing::warn!(error = %error, "talia_disk_io_collection_failed");
-            },
-        }
-    }
-}
-
-async fn network_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, sink: Arc<dyn Sink>) {
-    let mut provider: Option<NetworkProvider> = None;
-    let mut disabled_logged = false;
-
-    loop {
-        let config = shared_config.read().await.clone();
-        let interval = Duration::from_secs(config.network.interval_seconds);
-        if !config.network.enabled {
-            if provider.take().is_some() {
-                tracing::info!("talia_network_collector_stopped");
-            }
-            if !disabled_logged {
-                tracing::info!("talia_network_collector_disabled");
-                disabled_logged = true;
-            }
-            tokio::time::sleep(interval).await;
-            continue;
-        }
-        disabled_logged = false;
-        if provider.is_none() {
-            tracing::info!("talia_network_collector_starting");
-            match NetworkProvider::load(interval) {
-                Ok(loaded) => {
-                    provider = Some(loaded);
-                    tracing::info!("talia_network_collector_started");
-                },
-                Err(error) => {
-                    tracing::warn!(error = %error, "talia_network_collector_start_failed");
-                    tokio::time::sleep(interval).await;
-                    continue;
-                },
-            }
-        }
-
-        tokio::time::sleep(interval).await;
-        let Some(provider) = provider.as_mut() else {
-            continue;
-        };
-        provider.set_window(interval);
-        match provider.collect() {
-            Ok(samples) => {
-                for sample in &samples {
-                    sink.emit(sample, &config.version);
-                }
-                tracing::debug!(sample_count = samples.len(), "talia_network_collected");
-            },
-            Err(error) => {
-                tracing::warn!(error = %error, "talia_network_collection_failed");
-            },
-        }
-    }
-}
-
-async fn cpu_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, sink: Arc<dyn Sink>) {
-    let mut provider: Option<CpuProvider> = None;
-    let mut disabled_logged = false;
-
-    loop {
-        let config = shared_config.read().await.clone();
-        let interval = Duration::from_secs(config.cpu.interval_seconds);
-        if !config.cpu.enabled {
-            if provider.take().is_some() {
-                tracing::info!("talia_cpu_collector_stopped");
-            }
-            if !disabled_logged {
-                tracing::info!("talia_cpu_collector_disabled");
-                disabled_logged = true;
-            }
-            tokio::time::sleep(interval).await;
-            continue;
-        }
-        disabled_logged = false;
-        if provider.is_none() {
-            tracing::info!("talia_cpu_collector_starting");
-            match CpuProvider::load(interval) {
-                Ok(loaded) => {
-                    provider = Some(loaded);
-                    tracing::info!("talia_cpu_collector_started");
-                },
-                Err(error) => {
-                    tracing::warn!(error = %error, "talia_cpu_collector_start_failed");
-                    tokio::time::sleep(interval).await;
-                    continue;
-                },
-            }
-        }
-
-        tokio::time::sleep(interval).await;
-        let Some(provider) = provider.as_mut() else {
-            continue;
-        };
-        provider.set_window(interval);
-        match provider.collect() {
-            Ok(samples) => {
-                for sample in &samples {
-                    sink.emit(sample, &config.version);
-                }
-                tracing::debug!(sample_count = samples.len(), "talia_cpu_collected");
-            },
-            Err(error) => {
-                tracing::warn!(error = %error, "talia_cpu_collection_failed");
-            },
-        }
-    }
-}
-
-async fn storage_loop(
-    shared_config: Arc<RwLock<AgentRuntimeConfig>>,
-    sink: Arc<dyn Sink>,
-) -> Result<()> {
-    let mut provider: Box<dyn Provider> = Box::new(StorageProvider::new(Vec::new()));
-    let mut configured_mounts: Vec<String> = Vec::new();
-    loop {
-        let config = shared_config.read().await.clone();
-        if config.storage.enabled {
-            if config.storage.mounts != configured_mounts {
-                configured_mounts = config.storage.mounts.clone();
-                provider = Box::new(StorageProvider::new(configured_mounts.clone()));
-            }
-            match provider.collect() {
-                Ok(samples) => {
-                    for sample in &samples {
-                        sink.emit(sample, &config.version);
-                    }
-                    tracing::info!(
-                        config_version = %config.version,
-                        sample_count = samples.len(),
-                        "talia_storage_collected"
-                    );
-                },
-                Err(error) => {
-                    tracing::warn!(error = %error, "talia_storage_collection_failed");
-                },
-            }
-        }
-        tokio::time::sleep(Duration::from_secs(config.storage.interval_seconds)).await;
-    }
+    tokio::signal::ctrl_c()
+        .await
+        .context("failed to listen for shutdown signal")?;
+    tracing::info!("talia_agent_shutdown_signal");
+    Ok(())
 }
 
 async fn config_poll_loop(
@@ -688,23 +464,11 @@ async fn fetch_remote_config(
 }
 
 fn enabled_collectors(config: &AgentRuntimeConfig) -> Vec<String> {
-    let mut collectors = Vec::new();
-    if config.storage.enabled {
-        collectors.push("storage".to_string());
-    }
-    if config.memory.enabled {
-        collectors.push("memory".to_string());
-    }
-    if config.cpu.enabled {
-        collectors.push("cpu".to_string());
-    }
-    if config.network.enabled {
-        collectors.push("network".to_string());
-    }
-    if config.disk_io.enabled {
-        collectors.push("disk_io".to_string());
-    }
-    collectors
+    runner::collector_specs()
+        .iter()
+        .filter(|spec| (spec.schedule)(config).0)
+        .map(|spec| spec.name.to_string())
+        .collect()
 }
 
 fn optional_env_secret(name: &'static str) -> Result<Option<String>> {

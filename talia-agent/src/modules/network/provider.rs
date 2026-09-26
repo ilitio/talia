@@ -38,16 +38,16 @@ impl NetworkProvider {
             .map(|collector| Self { collector, window })
             .map_err(|source| ProviderError::new("network", source))
     }
-
-    /// Updates the sampling window, e.g. after a config change.
-    pub fn set_window(&mut self, window: Duration) {
-        self.window = window;
-    }
 }
 
 impl Provider for NetworkProvider {
     fn name(&self) -> &'static str {
         "network"
+    }
+
+    /// Updates the sampling window, e.g. after a config change.
+    fn set_window(&mut self, window: Duration) {
+        self.window = window;
     }
 
     fn collect(&mut self) -> Result<Vec<Sample>, ProviderError> {
