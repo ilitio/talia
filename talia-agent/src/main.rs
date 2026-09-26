@@ -29,8 +29,13 @@ use reqwest::StatusCode;
 use talia_agent::identity;
 use talia_agent::modules::cpu::CPU_UTILIZATION_SAMPLE;
 use talia_agent::modules::cpu::CpuProvider;
-use talia_agent::modules::disk_io::DiskIoCollector;
-use talia_agent::modules::disk_io::DiskIoSample;
+use talia_agent::modules::disk_io::DISK_ERRORS_SAMPLE;
+use talia_agent::modules::disk_io::DISK_IN_FLIGHT_BYTES_SAMPLE;
+use talia_agent::modules::disk_io::DISK_IO_SAMPLE;
+use talia_agent::modules::disk_io::DISK_LATENCY_SAMPLE;
+use talia_agent::modules::disk_io::DISK_OPERATIONS_SAMPLE;
+use talia_agent::modules::disk_io::DISK_QUEUE_DEPTH_SAMPLE;
+use talia_agent::modules::disk_io::DiskIoProvider;
 use talia_agent::modules::memory::MEMORY_USAGE_SAMPLE;
 use talia_agent::modules::memory::MEMORY_UTILIZATION_SAMPLE;
 use talia_agent::modules::memory::MemoryProvider;
@@ -251,24 +256,27 @@ impl Metrics {
             (NETWORK_IO_SAMPLE, SampleValue::Counter(bytes)) => {
                 self.network_io.add(bytes, &attributes);
             },
+            (DISK_IO_SAMPLE, SampleValue::Counter(bytes)) => {
+                self.disk_io.add(bytes, &attributes);
+            },
+            (DISK_OPERATIONS_SAMPLE, SampleValue::Counter(operations)) => {
+                self.disk_operations.add(operations, &attributes);
+            },
+            (DISK_ERRORS_SAMPLE, SampleValue::Counter(errors)) => {
+                self.disk_errors.add(errors, &attributes);
+            },
+            (DISK_LATENCY_SAMPLE, SampleValue::GaugeF64(latency_ms)) => {
+                self.disk_latency.record(latency_ms, &attributes);
+            },
+            (DISK_QUEUE_DEPTH_SAMPLE, SampleValue::GaugeI64(operations)) => {
+                self.disk_queue_depth.record(operations, &attributes);
+            },
+            (DISK_IN_FLIGHT_BYTES_SAMPLE, SampleValue::GaugeI64(bytes)) => {
+                self.disk_in_flight_bytes.record(bytes, &attributes);
+            },
             (name, _) => {
                 tracing::warn!(sample_name = %name, "talia_unknown_sample_dropped");
             },
-        }
-    }
-
-    fn record_disk_io(&self, config_version: &str, sample: &DiskIoSample) {
-        let attributes = disk_io_attributes(config_version, sample);
-        self.disk_io.add(sample.bytes, &attributes);
-        self.disk_operations.add(sample.operations, &attributes);
-        self.disk_errors.add(sample.errors, &attributes);
-        self.disk_queue_depth
-            .record(sample.in_flight_operations, &attributes);
-        self.disk_in_flight_bytes
-            .record(sample.in_flight_bytes, &attributes);
-        if let Some(latency) = sample.average_latency {
-            self.disk_latency
-                .record(latency.as_secs_f64() * 1_000.0, &attributes);
         }
     }
 }
@@ -426,14 +434,14 @@ async fn memory_loop(
 }
 
 async fn disk_io_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: Arc<Metrics>) {
-    let mut collector = None;
+    let mut provider: Option<DiskIoProvider> = None;
     let mut disabled_logged = false;
 
     loop {
         let config = shared_config.read().await.clone();
         let interval = Duration::from_secs(config.disk_io.interval_seconds);
         if !config.disk_io.enabled {
-            if collector.take().is_some() {
+            if provider.take().is_some() {
                 tracing::info!("talia_disk_io_collector_stopped");
             }
             if !disabled_logged {
@@ -444,11 +452,11 @@ async fn disk_io_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: A
             continue;
         }
         disabled_logged = false;
-        if collector.is_none() {
+        if provider.is_none() {
             tracing::info!("talia_disk_io_collector_starting");
-            match DiskIoCollector::load() {
+            match DiskIoProvider::load(interval) {
                 Ok(loaded) => {
-                    collector = Some(loaded);
+                    provider = Some(loaded);
                     tracing::info!("talia_disk_io_collector_started");
                 },
                 Err(error) => {
@@ -460,26 +468,16 @@ async fn disk_io_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: A
         }
 
         tokio::time::sleep(interval).await;
-        let Some(collector) = collector.as_mut() else {
+        let Some(provider) = provider.as_mut() else {
             continue;
         };
-        match collector.collect(interval) {
-            Ok(snapshot) => {
-                for sample in &snapshot.samples {
-                    metrics.record_disk_io(&config.version, sample);
-                    tracing::debug!(
-                        direction = sample.direction.as_str(),
-                        bytes = sample.bytes,
-                        operations = sample.operations,
-                        errors = sample.errors,
-                        average_latency_ms = sample
-                            .average_latency
-                            .map(|latency| latency.as_secs_f64() * 1_000.0),
-                        in_flight_operations = sample.in_flight_operations,
-                        in_flight_bytes = sample.in_flight_bytes,
-                        "talia_disk_io_collected"
-                    );
+        provider.set_window(interval);
+        match provider.collect() {
+            Ok(samples) => {
+                for sample in &samples {
+                    metrics.record_sample(&config.version, sample);
                 }
+                tracing::debug!(sample_count = samples.len(), "talia_disk_io_collected");
             },
             Err(error) => {
                 tracing::warn!(error = %error, "talia_disk_io_collection_failed");
@@ -946,13 +944,6 @@ fn sample_attributes(config_version: &str, sample: &Sample) -> Vec<KeyValue> {
         config_version.to_string(),
     ));
     attributes
-}
-
-fn disk_io_attributes(config_version: &str, sample: &DiskIoSample) -> Vec<KeyValue> {
-    vec![
-        KeyValue::new("disk.io.direction", sample.direction.as_str()),
-        KeyValue::new(CONFIG_VERSION_ATTRIBUTE, config_version.to_string()),
-    ]
 }
 
 fn enabled_collectors(config: &AgentRuntimeConfig) -> Vec<String> {
