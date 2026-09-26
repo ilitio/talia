@@ -16,6 +16,7 @@ use std::time::Duration;
 use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
+use clap::Subcommand;
 use futures_util::SinkExt;
 use futures_util::StreamExt;
 use reqwest::StatusCode;
@@ -23,6 +24,7 @@ use talia_agent::identity;
 use talia_agent::identity::AgentIdentity;
 use talia_agent::runner;
 use talia_agent::sinks::OtlpSink;
+use talia_agent::sinks::StdoutSink;
 use talia_core::config::AgentBootstrapConfig;
 use talia_core::config::AgentRuntimeConfig;
 use talia_core::control::AGENT_CONFIG_TOKEN_HEADER;
@@ -48,6 +50,41 @@ struct Args {
     config: Option<PathBuf>,
     #[arg(long, default_value = "info")]
     log_filter: String,
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Run the agent service (default when omitted).
+    Run,
+    /// Work with data providers.
+    Providers {
+        #[command(subcommand)]
+        action: ProvidersAction,
+    },
+    /// Collect one provider's samples to stdout for a fixed duration.
+    Query {
+        /// Provider name, e.g. `cpu` (see `providers list`).
+        provider: String,
+        /// How long to collect, e.g. `30s`, `5m`.
+        #[arg(long, value_parser = humantime::parse_duration)]
+        r#for: Duration,
+        /// Collection interval, e.g. `5s`.
+        #[arg(long, default_value = "5s", value_parser = humantime::parse_duration)]
+        interval: Duration,
+    },
+    /// Load a provider and run one collection, reporting success or failure.
+    Check {
+        /// Provider name, e.g. `cpu` (see `providers list`).
+        provider: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProvidersAction {
+    /// List available provider names.
+    List,
 }
 
 #[derive(Clone)]
@@ -74,6 +111,29 @@ async fn run() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::new(args.log_filter))
         .init();
+
+    // One-shot CLI modes run standalone, without the service bootstrap.
+    match &args.command {
+        Some(Command::Providers {
+            action: ProvidersAction::List,
+        }) => {
+            for spec in runner::collector_specs() {
+                println!("{}", spec.name);
+            }
+            return Ok(());
+        },
+        Some(Command::Query {
+            provider,
+            r#for,
+            interval,
+        }) => {
+            return query_provider(provider, *r#for, *interval).await;
+        },
+        Some(Command::Check { provider }) => {
+            return check_provider(provider).await;
+        },
+        Some(Command::Run) | None => {},
+    }
 
     let mut bootstrap = match &args.config {
         Some(path) => AgentBootstrapConfig::load(path)
@@ -469,6 +529,73 @@ fn enabled_collectors(config: &AgentRuntimeConfig) -> Vec<String> {
         .filter(|spec| (spec.schedule)(config).0)
         .map(|spec| spec.name.to_string())
         .collect()
+}
+
+/// Looks up a collector spec by provider name.
+fn collector_spec(name: &str) -> Result<runner::CollectorSpec> {
+    runner::collector_specs()
+        .into_iter()
+        .find(|spec| spec.name == name)
+        .with_context(|| {
+            let known: Vec<_> = runner::collector_specs()
+                .iter()
+                .map(|spec| spec.name)
+                .collect();
+            format!(
+                "unknown provider '{name}'; known providers: {}",
+                known.join(", ")
+            )
+        })
+}
+
+/// Collects one provider's samples to stdout for the given duration,
+/// bpftrace-style.
+async fn query_provider(name: &str, duration: Duration, interval: Duration) -> Result<()> {
+    let mut spec = collector_spec(name)?;
+    let mut provider =
+        (spec.factory)(interval).with_context(|| format!("failed to load provider '{name}'"))?;
+    let sink = StdoutSink::new();
+    let start = std::time::Instant::now();
+    loop {
+        if spec.sleep_before_collect {
+            tokio::time::sleep(interval).await;
+        }
+        provider.set_window(interval);
+        match provider.collect() {
+            Ok(samples) => {
+                for sample in &samples {
+                    sink.emit(sample, "query");
+                }
+            },
+            Err(error) => {
+                tracing::warn!(provider = name, error = %error, "talia_query_collection_failed");
+            },
+        }
+        if start.elapsed() >= duration {
+            break;
+        }
+        if !spec.sleep_before_collect {
+            tokio::time::sleep(interval).await;
+        }
+    }
+    Ok(())
+}
+
+/// Loads a provider and runs one collection, reporting success or failure.
+async fn check_provider(name: &str) -> Result<()> {
+    let mut spec = collector_spec(name)?;
+    let interval = Duration::from_secs(5);
+    let mut provider =
+        (spec.factory)(interval).with_context(|| format!("failed to load provider '{name}'"))?;
+    if spec.sleep_before_collect {
+        tokio::time::sleep(interval).await;
+    }
+    provider.set_window(interval);
+    let samples = provider
+        .collect()
+        .with_context(|| format!("provider '{name}' collection failed"))?;
+    println!("ok: provider '{name}' returned {} samples", samples.len());
+    Ok(())
 }
 
 fn optional_env_secret(name: &'static str) -> Result<Option<String>> {
