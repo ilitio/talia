@@ -26,6 +26,8 @@ pub enum SampleValue {
     Counter(u64),
     /// A point-in-time unsigned measurement, e.g. bytes used.
     GaugeU64(u64),
+    /// A point-in-time signed measurement, e.g. in-flight operations.
+    GaugeI64(i64),
     /// A point-in-time float measurement, e.g. a utilization ratio.
     GaugeF64(f64),
 }
