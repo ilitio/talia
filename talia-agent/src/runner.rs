@@ -8,9 +8,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use talia_core::config::AgentRuntimeConfig;
+use talia_core::pipeline::Processor;
 use talia_core::pipeline::Provider;
 use talia_core::pipeline::ProviderError;
 use talia_core::pipeline::Sink;
+use talia_core::pipeline::process_sample;
 use tokio::sync::RwLock;
 
 use crate::modules::cpu::CpuProvider;
@@ -110,9 +112,10 @@ pub fn collector_specs() -> Vec<CollectorSpec> {
 }
 
 /// Runs one collector forever: lazy provider load, per-interval collection,
-/// and fan-out of every sample to all sinks.
+/// and fan-out of every sample through the processors to all sinks.
 pub async fn run_collector(
     mut spec: CollectorSpec,
+    processors: Vec<Arc<dyn Processor>>,
     sinks: Vec<Arc<dyn Sink>>,
     shared_config: Arc<RwLock<AgentRuntimeConfig>>,
 ) {
@@ -163,14 +166,18 @@ pub async fn run_collector(
         provider.reconfigure(&config);
         match provider.collect() {
             Ok(samples) => {
-                for sample in &samples {
-                    for sink in &sinks {
-                        sink.emit(sample, &config.version);
+                let mut kept = 0;
+                for sample in samples {
+                    if let Some(sample) = process_sample(&processors, sample) {
+                        kept += 1;
+                        for sink in &sinks {
+                            sink.emit(&sample, &config.version);
+                        }
                     }
                 }
                 tracing::debug!(
                     collector = spec.name,
-                    sample_count = samples.len(),
+                    sample_count = kept,
                     "talia_collected"
                 );
             },
