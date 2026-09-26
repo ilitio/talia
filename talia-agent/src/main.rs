@@ -35,8 +35,13 @@ use talia_agent::modules::memory::MemoryCollector;
 use talia_agent::modules::memory::MemorySample;
 use talia_agent::modules::network::NetworkCollector;
 use talia_agent::modules::network::NetworkSample;
-use talia_agent::modules::storage::FilesystemSample;
-use talia_agent::modules::storage::collect_filesystems;
+use talia_agent::modules::storage::FILESYSTEM_LIMIT_SAMPLE;
+use talia_agent::modules::storage::FILESYSTEM_USAGE_SAMPLE;
+use talia_agent::modules::storage::FILESYSTEM_UTILIZATION_SAMPLE;
+use talia_agent::modules::storage::StorageProvider;
+use talia_agent::pipeline::Provider;
+use talia_agent::pipeline::Sample;
+use talia_agent::pipeline::SampleValue;
 use talia_core::config::AgentBootstrapConfig;
 use talia_core::config::AgentRuntimeConfig;
 use talia_core::control::AGENT_CONFIG_TOKEN_HEADER;
@@ -205,27 +210,34 @@ impl Metrics {
         })
     }
 
-    fn record_filesystem(&self, config_version: &str, sample: &FilesystemSample) {
-        let base_attributes = filesystem_attributes(config_version, sample);
-        self.filesystem_limit
-            .record(sample.limit_bytes, &base_attributes);
-
-        let mut used_attributes = base_attributes.clone();
-        used_attributes.push(KeyValue::new("system.filesystem.state", "used"));
-        self.filesystem_usage
-            .record(sample.used_bytes, &used_attributes);
-        self.filesystem_utilization
-            .record(sample.used_ratio, &used_attributes);
-
-        let mut free_attributes = base_attributes.clone();
-        free_attributes.push(KeyValue::new("system.filesystem.state", "free"));
-        self.filesystem_usage
-            .record(sample.free_bytes, &free_attributes);
-
-        let mut reserved_attributes = base_attributes;
-        reserved_attributes.push(KeyValue::new("system.filesystem.state", "reserved"));
-        self.filesystem_usage
-            .record(sample.reserved_bytes, &reserved_attributes);
+    /// Records one neutral pipeline [`Sample`] into the OTLP instruments.
+    ///
+    /// The config version attribute is attached here so providers stay
+    /// transport-agnostic.
+    fn record_sample(&self, config_version: &str, sample: &Sample) {
+        let mut attributes: Vec<KeyValue> = sample
+            .attributes
+            .iter()
+            .map(|(key, value)| KeyValue::new(key.clone(), value.clone()))
+            .collect();
+        attributes.push(KeyValue::new(
+            CONFIG_VERSION_ATTRIBUTE,
+            config_version.to_string(),
+        ));
+        match (sample.name.as_str(), sample.value) {
+            (FILESYSTEM_LIMIT_SAMPLE, SampleValue::GaugeU64(bytes)) => {
+                self.filesystem_limit.record(bytes, &attributes);
+            },
+            (FILESYSTEM_USAGE_SAMPLE, SampleValue::GaugeU64(bytes)) => {
+                self.filesystem_usage.record(bytes, &attributes);
+            },
+            (FILESYSTEM_UTILIZATION_SAMPLE, SampleValue::GaugeF64(ratio)) => {
+                self.filesystem_utilization.record(ratio, &attributes);
+            },
+            (name, _) => {
+                tracing::warn!(sample_name = %name, "talia_unknown_sample_dropped");
+            },
+        }
     }
 
     fn record_cpu(&self, config_version: &str, sample: &CpuSnapshot) {
@@ -640,17 +652,23 @@ async fn storage_loop(
     shared_config: Arc<RwLock<AgentRuntimeConfig>>,
     metrics: Arc<Metrics>,
 ) -> Result<()> {
+    let mut provider: Box<dyn Provider> = Box::new(StorageProvider::new(Vec::new()));
+    let mut configured_mounts: Vec<String> = Vec::new();
     loop {
         let config = shared_config.read().await.clone();
         if config.storage.enabled {
-            match collect_filesystems(&config.storage.mounts) {
+            if config.storage.mounts != configured_mounts {
+                configured_mounts = config.storage.mounts.clone();
+                provider = Box::new(StorageProvider::new(configured_mounts.clone()));
+            }
+            match provider.collect() {
                 Ok(samples) => {
                     for sample in &samples {
-                        metrics.record_filesystem(&config.version, sample);
+                        metrics.record_sample(&config.version, sample);
                     }
                     tracing::info!(
                         config_version = %config.version,
-                        mount_count = samples.len(),
+                        sample_count = samples.len(),
                         "talia_storage_collected"
                     );
                 },
@@ -966,23 +984,6 @@ async fn fetch_remote_config(
         .await
         .map_err(reqwest::Error::without_url)
         .context("failed to decode control config response")
-}
-
-fn filesystem_attributes(config_version: &str, sample: &FilesystemSample) -> Vec<KeyValue> {
-    let mut attributes = vec![
-        KeyValue::new("system.filesystem.mountpoint", sample.mountpoint.clone()),
-        KeyValue::new(CONFIG_VERSION_ATTRIBUTE, config_version.to_string()),
-    ];
-    if let Some(filesystem_type) = &sample.filesystem_type {
-        attributes.push(KeyValue::new(
-            "system.filesystem.type",
-            filesystem_type.clone(),
-        ));
-    }
-    if let Some(mode) = &sample.mode {
-        attributes.push(KeyValue::new("system.filesystem.mode", mode.clone()));
-    }
-    attributes
 }
 
 fn cpu_attributes(config_version: &str, cpu: &str) -> Vec<KeyValue> {
