@@ -7,8 +7,10 @@
 
 mod provider;
 mod sample;
+mod sink;
 
 pub use provider::Provider;
 pub use provider::ProviderError;
 pub use sample::Sample;
 pub use sample::SampleValue;
+pub use sink::Sink;
