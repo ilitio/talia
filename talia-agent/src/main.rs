@@ -27,8 +27,8 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::metrics::Temporality;
 use reqwest::StatusCode;
 use talia_agent::identity;
-use talia_agent::modules::cpu::CpuCollector;
-use talia_agent::modules::cpu::CpuSnapshot;
+use talia_agent::modules::cpu::CPU_UTILIZATION_SAMPLE;
+use talia_agent::modules::cpu::CpuProvider;
 use talia_agent::modules::disk_io::DiskIoCollector;
 use talia_agent::modules::disk_io::DiskIoSample;
 use talia_agent::modules::memory::MEMORY_USAGE_SAMPLE;
@@ -245,23 +245,13 @@ impl Metrics {
             (SWAP_IO_SAMPLE, SampleValue::Counter(bytes)) => {
                 self.swap_io.add(bytes, &attributes);
             },
+            (CPU_UTILIZATION_SAMPLE, SampleValue::GaugeF64(ratio)) => {
+                self.cpu_utilization.record(ratio, &attributes);
+            },
             (name, _) => {
                 tracing::warn!(sample_name = %name, "talia_unknown_sample_dropped");
             },
         }
-    }
-
-    fn record_cpu(&self, config_version: &str, sample: &CpuSnapshot) {
-        let cpu = sample.cpu.to_string();
-        self.record_cpu_state(config_version, &cpu, "idle", sample.idle_ratio());
-        self.record_cpu_state(config_version, &cpu, "user", sample.user_ratio());
-        self.record_cpu_state(config_version, &cpu, "system", sample.system_ratio());
-    }
-
-    fn record_cpu_state(&self, config_version: &str, cpu: &str, state: &str, ratio: f64) {
-        let mut attributes = cpu_attributes(config_version, cpu);
-        attributes.push(KeyValue::new("system.cpu.state", state.to_string()));
-        self.cpu_utilization.record(ratio, &attributes);
     }
 
     fn record_network(&self, config_version: &str, sample: &NetworkSample) {
@@ -558,14 +548,14 @@ async fn network_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: A
 }
 
 async fn cpu_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: Arc<Metrics>) {
-    let mut collector = None;
+    let mut provider: Option<CpuProvider> = None;
     let mut disabled_logged = false;
 
     loop {
         let config = shared_config.read().await.clone();
         let interval = Duration::from_secs(config.cpu.interval_seconds);
         if !config.cpu.enabled {
-            if collector.take().is_some() {
+            if provider.take().is_some() {
                 tracing::info!("talia_cpu_collector_stopped");
             }
             if !disabled_logged {
@@ -576,11 +566,11 @@ async fn cpu_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: Arc<M
             continue;
         }
         disabled_logged = false;
-        if collector.is_none() {
+        if provider.is_none() {
             tracing::info!("talia_cpu_collector_starting");
-            match CpuCollector::load() {
+            match CpuProvider::load(interval) {
                 Ok(loaded) => {
-                    collector = Some(loaded);
+                    provider = Some(loaded);
                     tracing::info!("talia_cpu_collector_started");
                 },
                 Err(error) => {
@@ -592,21 +582,16 @@ async fn cpu_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: Arc<M
         }
 
         tokio::time::sleep(interval).await;
-        let Some(collector) = collector.as_mut() else {
+        let Some(provider) = provider.as_mut() else {
             continue;
         };
-        match collector.collect(interval) {
+        provider.set_window(interval);
+        match provider.collect() {
             Ok(samples) => {
-                for sample in samples {
-                    metrics.record_cpu(&config.version, &sample);
-                    tracing::debug!(
-                        cpu = sample.cpu,
-                        idle_ratio = sample.idle_ratio(),
-                        user_ratio = sample.user_ratio(),
-                        system_ratio = sample.system_ratio(),
-                        "talia_cpu_collected"
-                    );
+                for sample in &samples {
+                    metrics.record_sample(&config.version, sample);
                 }
+                tracing::debug!(sample_count = samples.len(), "talia_cpu_collected");
             },
             Err(error) => {
                 tracing::warn!(error = %error, "talia_cpu_collection_failed");
@@ -951,13 +936,6 @@ async fn fetch_remote_config(
         .await
         .map_err(reqwest::Error::without_url)
         .context("failed to decode control config response")
-}
-
-fn cpu_attributes(config_version: &str, cpu: &str) -> Vec<KeyValue> {
-    vec![
-        KeyValue::new("system.cpu.logical_number", cpu.to_string()),
-        KeyValue::new(CONFIG_VERSION_ATTRIBUTE, config_version.to_string()),
-    ]
 }
 
 /// Builds the OTLP attributes for one neutral pipeline [`Sample`]: the
