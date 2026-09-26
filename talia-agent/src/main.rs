@@ -31,8 +31,12 @@ use talia_agent::modules::cpu::CpuCollector;
 use talia_agent::modules::cpu::CpuSnapshot;
 use talia_agent::modules::disk_io::DiskIoCollector;
 use talia_agent::modules::disk_io::DiskIoSample;
-use talia_agent::modules::memory::MemoryCollector;
-use talia_agent::modules::memory::MemorySample;
+use talia_agent::modules::memory::MEMORY_USAGE_SAMPLE;
+use talia_agent::modules::memory::MEMORY_UTILIZATION_SAMPLE;
+use talia_agent::modules::memory::MemoryProvider;
+use talia_agent::modules::memory::SWAP_IO_SAMPLE;
+use talia_agent::modules::memory::SWAP_USAGE_SAMPLE;
+use talia_agent::modules::memory::SWAP_UTILIZATION_SAMPLE;
 use talia_agent::modules::network::NetworkCollector;
 use talia_agent::modules::network::NetworkSample;
 use talia_agent::modules::storage::FILESYSTEM_LIMIT_SAMPLE;
@@ -215,15 +219,7 @@ impl Metrics {
     /// The config version attribute is attached here so providers stay
     /// transport-agnostic.
     fn record_sample(&self, config_version: &str, sample: &Sample) {
-        let mut attributes: Vec<KeyValue> = sample
-            .attributes
-            .iter()
-            .map(|(key, value)| KeyValue::new(key.clone(), value.clone()))
-            .collect();
-        attributes.push(KeyValue::new(
-            CONFIG_VERSION_ATTRIBUTE,
-            config_version.to_string(),
-        ));
+        let attributes = sample_attributes(config_version, sample);
         match (sample.name.as_str(), sample.value) {
             (FILESYSTEM_LIMIT_SAMPLE, SampleValue::GaugeU64(bytes)) => {
                 self.filesystem_limit.record(bytes, &attributes);
@@ -233,6 +229,21 @@ impl Metrics {
             },
             (FILESYSTEM_UTILIZATION_SAMPLE, SampleValue::GaugeF64(ratio)) => {
                 self.filesystem_utilization.record(ratio, &attributes);
+            },
+            (MEMORY_USAGE_SAMPLE, SampleValue::GaugeU64(bytes)) => {
+                self.memory_usage.record(bytes, &attributes);
+            },
+            (MEMORY_UTILIZATION_SAMPLE, SampleValue::GaugeF64(ratio)) => {
+                self.memory_utilization.record(ratio, &attributes);
+            },
+            (SWAP_USAGE_SAMPLE, SampleValue::GaugeU64(bytes)) => {
+                self.swap_usage.record(bytes, &attributes);
+            },
+            (SWAP_UTILIZATION_SAMPLE, SampleValue::GaugeF64(ratio)) => {
+                self.swap_utilization.record(ratio, &attributes);
+            },
+            (SWAP_IO_SAMPLE, SampleValue::Counter(bytes)) => {
+                self.swap_io.add(bytes, &attributes);
             },
             (name, _) => {
                 tracing::warn!(sample_name = %name, "talia_unknown_sample_dropped");
@@ -245,49 +256,6 @@ impl Metrics {
         self.record_cpu_state(config_version, &cpu, "idle", sample.idle_ratio());
         self.record_cpu_state(config_version, &cpu, "user", sample.user_ratio());
         self.record_cpu_state(config_version, &cpu, "system", sample.system_ratio());
-    }
-
-    fn record_memory(&self, config_version: &str, sample: &MemorySample) {
-        self.record_memory_state(config_version, "total", sample.total_bytes);
-        self.record_memory_state(config_version, "used", sample.used_bytes);
-        self.record_memory_state(config_version, "available", sample.available_bytes);
-        self.record_memory_state(config_version, "free", sample.free_bytes);
-        self.record_memory_state(config_version, "cached", sample.cached_bytes);
-        self.memory_utilization
-            .record(sample.used_ratio, &memory_attributes(config_version));
-
-        self.record_swap_state(config_version, "total", sample.swap_total_bytes);
-        self.record_swap_state(config_version, "used", sample.swap_used_bytes);
-        self.record_swap_state(config_version, "free", sample.swap_free_bytes);
-        self.swap_utilization
-            .record(sample.swap_used_ratio, &memory_attributes(config_version));
-
-        self.record_swap_io(config_version, "in", sample.swap_in_bytes);
-        self.record_swap_io(config_version, "out", sample.swap_out_bytes);
-    }
-
-    fn record_memory_state(&self, config_version: &str, state: &str, bytes: u64) {
-        let mut attributes = memory_attributes(config_version);
-        attributes.push(KeyValue::new("system.memory.state", state.to_string()));
-        self.memory_usage.record(bytes, &attributes);
-    }
-
-    fn record_swap_state(&self, config_version: &str, state: &str, bytes: u64) {
-        let mut attributes = memory_attributes(config_version);
-        attributes.push(KeyValue::new(
-            "system.linux.memory.swap.state",
-            state.to_string(),
-        ));
-        self.swap_usage.record(bytes, &attributes);
-    }
-
-    fn record_swap_io(&self, config_version: &str, direction: &str, bytes: u64) {
-        let mut attributes = memory_attributes(config_version);
-        attributes.push(KeyValue::new(
-            "system.linux.memory.swap.direction",
-            direction.to_string(),
-        ));
-        self.swap_io.add(bytes, &attributes);
     }
 
     fn record_cpu_state(&self, config_version: &str, cpu: &str, state: &str, ratio: f64) {
@@ -445,19 +413,18 @@ async fn memory_loop(
     shared_config: Arc<RwLock<AgentRuntimeConfig>>,
     metrics: Arc<Metrics>,
 ) -> Result<()> {
-    let mut collector = MemoryCollector::new();
+    let mut provider: Box<dyn Provider> = Box::new(MemoryProvider::new());
     loop {
         let config = shared_config.read().await.clone();
         if config.memory.enabled {
-            match collector.collect() {
-                Ok(sample) => {
-                    metrics.record_memory(&config.version, &sample);
+            match provider.collect() {
+                Ok(samples) => {
+                    for sample in &samples {
+                        metrics.record_sample(&config.version, sample);
+                    }
                     tracing::info!(
                         config_version = %config.version,
-                        used_ratio = sample.used_ratio,
-                        swap_used_ratio = sample.swap_used_ratio,
-                        swap_in_bytes = sample.swap_in_bytes,
-                        swap_out_bytes = sample.swap_out_bytes,
+                        sample_count = samples.len(),
                         "talia_memory_collected"
                     );
                 },
@@ -993,11 +960,20 @@ fn cpu_attributes(config_version: &str, cpu: &str) -> Vec<KeyValue> {
     ]
 }
 
-fn memory_attributes(config_version: &str) -> Vec<KeyValue> {
-    vec![KeyValue::new(
+/// Builds the OTLP attributes for one neutral pipeline [`Sample`]: the
+/// sample's own dimensions plus Talia's config version, so providers stay
+/// transport-agnostic.
+fn sample_attributes(config_version: &str, sample: &Sample) -> Vec<KeyValue> {
+    let mut attributes: Vec<KeyValue> = sample
+        .attributes
+        .iter()
+        .map(|(key, value)| KeyValue::new(key.clone(), value.clone()))
+        .collect();
+    attributes.push(KeyValue::new(
         CONFIG_VERSION_ATTRIBUTE,
         config_version.to_string(),
-    )]
+    ));
+    attributes
 }
 
 fn network_attributes(config_version: &str, sample: &NetworkSample) -> Vec<KeyValue> {
@@ -1122,16 +1098,29 @@ mod tests {
 
     #[test]
     fn metric_attributes_use_the_talia_config_version_key() {
-        // Given: a runtime configuration version.
+        // Given: a runtime configuration version and a pipeline sample.
         let config_version = "config-v1";
+        let sample = Sample {
+            name: MEMORY_USAGE_SAMPLE.to_string(),
+            value: SampleValue::GaugeU64(42),
+            attributes: std::collections::BTreeMap::from([(
+                "system.memory.state".to_string(),
+                "used".to_string(),
+            )]),
+            timestamp: std::time::SystemTime::now(),
+        };
 
-        // When: the agent builds attributes shared by memory metrics.
-        let attributes = memory_attributes(config_version);
+        // When: the agent builds the OTLP attributes for the sample.
+        let attributes = sample_attributes(config_version, &sample);
 
-        // Then: the emitted attribute uses Talia's neutral key and value.
-        assert_eq!(attributes.len(), 1);
-        assert_eq!(attributes[0].key.as_str(), "talia.config.version");
-        assert_eq!(attributes[0].value.to_string(), config_version);
+        // Then: the sample dimensions are kept and Talia's neutral config
+        // version key is attached.
+        assert_eq!(attributes.len(), 2);
+        let version = attributes
+            .iter()
+            .find(|attribute| attribute.key.as_str() == "talia.config.version")
+            .expect("config version attribute present");
+        assert_eq!(version.value.to_string(), config_version);
     }
 
     #[test]
