@@ -11,5 +11,8 @@
 pub mod config;
 /// HTTP headers and WebSocket messages used by the agent control protocol.
 pub mod control;
+/// Neutral telemetry data model and provider plugin traits shared by the
+/// agent's collectors and export sinks.
+pub mod pipeline;
 /// Constant-time comparison for control-plane secrets.
 pub mod secret;

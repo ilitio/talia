@@ -9,5 +9,3 @@ compile_error!("talia-agent supports Linux only");
 pub mod identity;
 #[cfg(target_os = "linux")]
 pub mod modules;
-#[cfg(target_os = "linux")]
-pub mod pipeline;

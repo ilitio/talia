@@ -1,41 +1,8 @@
-//! Neutral data model and plugin traits for the Talia collection pipeline.
-//!
-//! Providers produce [`Sample`]s without knowing where the data ends up; sinks
-//! will consume samples without knowing which provider produced them. This
-//! module is the seam that lets new collectors and new export destinations be
-//! added without touching the agent bootstrap.
-
-use std::collections::BTreeMap;
-use std::time::SystemTime;
+//! Provider plugin trait and error type.
 
 use thiserror::Error;
 
-/// A single measured value emitted by a provider.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Sample {
-    /// Dotted metric name, e.g. `system.filesystem.usage`.
-    pub name: String,
-    /// The measured value.
-    pub value: SampleValue,
-    /// Dimensions describing the measurement, e.g. `mountpoint` -> `/`.
-    ///
-    /// Transport-level attributes (such as the active config version) are
-    /// added by the sink, not the provider.
-    pub attributes: BTreeMap<String, String>,
-    /// When the measurement was taken.
-    pub timestamp: SystemTime,
-}
-
-/// The value carried by a [`Sample`].
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum SampleValue {
-    /// A monotonically increasing count, e.g. bytes transferred.
-    Counter(u64),
-    /// A point-in-time unsigned measurement, e.g. bytes used.
-    GaugeU64(u64),
-    /// A point-in-time float measurement, e.g. a utilization ratio.
-    GaugeF64(f64),
-}
+use super::sample::Sample;
 
 /// Error returned when a provider fails to collect.
 #[derive(Debug, Error)]
