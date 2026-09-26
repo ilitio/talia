@@ -37,8 +37,8 @@ use talia_agent::modules::memory::MemoryProvider;
 use talia_agent::modules::memory::SWAP_IO_SAMPLE;
 use talia_agent::modules::memory::SWAP_USAGE_SAMPLE;
 use talia_agent::modules::memory::SWAP_UTILIZATION_SAMPLE;
-use talia_agent::modules::network::NetworkCollector;
-use talia_agent::modules::network::NetworkSample;
+use talia_agent::modules::network::NETWORK_IO_SAMPLE;
+use talia_agent::modules::network::NetworkProvider;
 use talia_agent::modules::storage::FILESYSTEM_LIMIT_SAMPLE;
 use talia_agent::modules::storage::FILESYSTEM_USAGE_SAMPLE;
 use talia_agent::modules::storage::FILESYSTEM_UTILIZATION_SAMPLE;
@@ -248,15 +248,13 @@ impl Metrics {
             (CPU_UTILIZATION_SAMPLE, SampleValue::GaugeF64(ratio)) => {
                 self.cpu_utilization.record(ratio, &attributes);
             },
+            (NETWORK_IO_SAMPLE, SampleValue::Counter(bytes)) => {
+                self.network_io.add(bytes, &attributes);
+            },
             (name, _) => {
                 tracing::warn!(sample_name = %name, "talia_unknown_sample_dropped");
             },
         }
-    }
-
-    fn record_network(&self, config_version: &str, sample: &NetworkSample) {
-        self.network_io
-            .add(sample.bytes, &network_attributes(config_version, sample));
     }
 
     fn record_disk_io(&self, config_version: &str, sample: &DiskIoSample) {
@@ -491,14 +489,14 @@ async fn disk_io_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: A
 }
 
 async fn network_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: Arc<Metrics>) {
-    let mut collector = None;
+    let mut provider: Option<NetworkProvider> = None;
     let mut disabled_logged = false;
 
     loop {
         let config = shared_config.read().await.clone();
         let interval = Duration::from_secs(config.network.interval_seconds);
         if !config.network.enabled {
-            if collector.take().is_some() {
+            if provider.take().is_some() {
                 tracing::info!("talia_network_collector_stopped");
             }
             if !disabled_logged {
@@ -509,11 +507,11 @@ async fn network_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: A
             continue;
         }
         disabled_logged = false;
-        if collector.is_none() {
+        if provider.is_none() {
             tracing::info!("talia_network_collector_starting");
-            match NetworkCollector::load() {
+            match NetworkProvider::load(interval) {
                 Ok(loaded) => {
-                    collector = Some(loaded);
+                    provider = Some(loaded);
                     tracing::info!("talia_network_collector_started");
                 },
                 Err(error) => {
@@ -525,20 +523,16 @@ async fn network_loop(shared_config: Arc<RwLock<AgentRuntimeConfig>>, metrics: A
         }
 
         tokio::time::sleep(interval).await;
-        let Some(collector) = collector.as_mut() else {
+        let Some(provider) = provider.as_mut() else {
             continue;
         };
-        match collector.collect(interval) {
-            Ok(snapshot) => {
-                for sample in &snapshot.samples {
-                    metrics.record_network(&config.version, sample);
-                    tracing::debug!(
-                        direction = sample.direction.as_str(),
-                        bytes = sample.bytes,
-                        packets = sample.packets,
-                        "talia_network_collected"
-                    );
+        provider.set_window(interval);
+        match provider.collect() {
+            Ok(samples) => {
+                for sample in &samples {
+                    metrics.record_sample(&config.version, sample);
                 }
+                tracing::debug!(sample_count = samples.len(), "talia_network_collected");
             },
             Err(error) => {
                 tracing::warn!(error = %error, "talia_network_collection_failed");
@@ -952,13 +946,6 @@ fn sample_attributes(config_version: &str, sample: &Sample) -> Vec<KeyValue> {
         config_version.to_string(),
     ));
     attributes
-}
-
-fn network_attributes(config_version: &str, sample: &NetworkSample) -> Vec<KeyValue> {
-    vec![
-        KeyValue::new("network.io.direction", sample.direction.as_str()),
-        KeyValue::new(CONFIG_VERSION_ATTRIBUTE, config_version.to_string()),
-    ]
 }
 
 fn disk_io_attributes(config_version: &str, sample: &DiskIoSample) -> Vec<KeyValue> {
