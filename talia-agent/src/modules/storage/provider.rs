@@ -1,4 +1,4 @@
-//! [`Provider`](crate::pipeline::Provider) implementation for filesystem storage.
+//! [`Provider`](talia_core::pipeline::Provider) implementation for filesystem storage.
 
 use std::collections::BTreeMap;
 use std::time::SystemTime;
@@ -120,8 +120,8 @@ mod tests {
     use super::StorageProvider;
     use super::filesystem_samples;
     use crate::modules::storage::filesystem::FilesystemSample;
-    use crate::pipeline::Provider;
-    use crate::pipeline::SampleValue;
+    use talia_core::pipeline::Provider;
+    use talia_core::pipeline::SampleValue;
 
     fn sample_fixture() -> FilesystemSample {
         FilesystemSample {
