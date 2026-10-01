@@ -23,6 +23,8 @@ const DEFAULT_MEMORY_INTERVAL_SECONDS: u64 = 60;
 const DEFAULT_CPU_INTERVAL_SECONDS: u64 = 1;
 const DEFAULT_NETWORK_INTERVAL_SECONDS: u64 = 1;
 const DEFAULT_DISK_IO_INTERVAL_SECONDS: u64 = 1;
+const DEFAULT_TCP_POD_RETRANS_INTERVAL_SECONDS: u64 = 15;
+const DEFAULT_POD_DISCOVERY_CRI_SOCKET: &str = "all";
 const DEFAULT_CONTROL_HTTP_URL: &str = "http://127.0.0.1:3501";
 const DEFAULT_CONTROL_WS_URL: &str = "ws://127.0.0.1:3501/agent/control";
 const DEFAULT_OTLP_ENDPOINT: &str = "http://127.0.0.1:4317";
@@ -78,6 +80,12 @@ pub enum ConfigError {
     /// Disk I/O collection interval was zero.
     #[error("disk I/O interval must be greater than zero")]
     EmptyDiskIoInterval,
+    /// Pod discovery CRI socket selection was blank.
+    #[error("pod discovery CRI socket selection must not be empty")]
+    EmptyPodDiscoveryCriSocket,
+    /// Per-pod TCP retransmission collection interval was zero.
+    #[error("tcp_pod_retrans interval must be greater than zero")]
+    EmptyTcpPodRetransInterval,
     /// Control URL used an insecure non-loopback endpoint.
     #[error("{field} must use https/wss, or http/ws only for loopback endpoints: {value}")]
     InsecureControlUrl {
@@ -134,6 +142,12 @@ pub struct AgentBootstrapConfig {
     #[serde(default)]
     /// Fallback local disk I/O collector settings.
     pub disk_io: DiskIoConfig,
+    #[serde(default)]
+    /// Fallback local pod discovery settings.
+    pub pod_discovery: PodDiscoveryConfig,
+    #[serde(default)]
+    /// Fallback local per-pod TCP retransmission collector settings.
+    pub tcp_pod_retrans: TcpPodRetransConfig,
 }
 
 impl AgentBootstrapConfig {
@@ -159,6 +173,8 @@ impl AgentBootstrapConfig {
             cpu: self.cpu.clone(),
             network: self.network.clone(),
             disk_io: self.disk_io.clone(),
+            pod_discovery: self.pod_discovery.clone(),
+            tcp_pod_retrans: self.tcp_pod_retrans.clone(),
         }
     }
 
@@ -198,6 +214,8 @@ impl Default for AgentBootstrapConfig {
             cpu: CpuConfig::default(),
             network: NetworkConfig::default(),
             disk_io: DiskIoConfig::default(),
+            pod_discovery: PodDiscoveryConfig::default(),
+            tcp_pod_retrans: TcpPodRetransConfig::default(),
         }
     }
 }
@@ -228,6 +246,12 @@ pub struct AgentRuntimeConfig {
     #[serde(default)]
     /// Disk I/O collector settings.
     pub disk_io: DiskIoConfig,
+    #[serde(default)]
+    /// Pod discovery settings.
+    pub pod_discovery: PodDiscoveryConfig,
+    #[serde(default)]
+    /// Per-pod TCP retransmission collector settings.
+    pub tcp_pod_retrans: TcpPodRetransConfig,
 }
 
 impl AgentRuntimeConfig {
@@ -241,7 +265,9 @@ impl AgentRuntimeConfig {
         self.memory.validate()?;
         self.cpu.validate()?;
         self.network.validate()?;
-        self.disk_io.validate()
+        self.disk_io.validate()?;
+        self.pod_discovery.validate()?;
+        self.tcp_pod_retrans.validate()
     }
 }
 
@@ -255,6 +281,8 @@ impl Default for AgentRuntimeConfig {
             cpu: CpuConfig::default(),
             network: NetworkConfig::default(),
             disk_io: DiskIoConfig::default(),
+            pod_discovery: PodDiscoveryConfig::default(),
+            tcp_pod_retrans: TcpPodRetransConfig::default(),
         }
     }
 }
@@ -448,6 +476,66 @@ impl Default for DiskIoConfig {
     }
 }
 
+/// Pod discovery settings shared by per-pod collectors.
+///
+/// Pod discovery resolves Kubernetes pod sandboxes to network namespaces via
+/// the container runtime's CRI socket so per-pod collectors can attribute
+/// host-observed metrics to individual pods.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, utoipa::ToSchema)]
+pub struct PodDiscoveryConfig {
+    #[serde(default = "default_pod_discovery_cri_socket")]
+    /// CRI socket selection: `"all"` queries every reachable well-known CRI
+    /// socket and merges pods by UID, `"first"` uses the first reachable
+    /// well-known socket, any other value is used as an explicit socket path.
+    pub cri_socket: String,
+}
+
+impl PodDiscoveryConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.cri_socket.trim().is_empty() {
+            return Err(ConfigError::EmptyPodDiscoveryCriSocket);
+        }
+        Ok(())
+    }
+}
+
+impl Default for PodDiscoveryConfig {
+    fn default() -> Self {
+        Self {
+            cri_socket: default_pod_discovery_cri_socket(),
+        }
+    }
+}
+
+/// Per-pod TCP retransmission collector settings.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, utoipa::ToSchema)]
+pub struct TcpPodRetransConfig {
+    #[serde(default)]
+    /// Whether per-pod TCP retransmission collection is enabled.
+    pub enabled: bool,
+    #[serde(default = "default_tcp_pod_retrans_interval_seconds")]
+    /// Seconds between per-pod TCP retransmission collection samples.
+    pub interval_seconds: u64,
+}
+
+impl TcpPodRetransConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.interval_seconds == 0 {
+            return Err(ConfigError::EmptyTcpPodRetransInterval);
+        }
+        Ok(())
+    }
+}
+
+impl Default for TcpPodRetransConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval_seconds: default_tcp_pod_retrans_interval_seconds(),
+        }
+    }
+}
+
 /// Control-plane configuration file containing defaults, host overrides, and enrolled agents.
 ///
 /// Defaults apply to every host, host overrides refine a specific hostname, and
@@ -551,6 +639,12 @@ pub struct HostConfigOverride {
     #[serde(default)]
     /// Disk I/O settings override.
     pub disk_io: DiskIoConfigOverride,
+    #[serde(default)]
+    /// Pod discovery settings override.
+    pub pod_discovery: PodDiscoveryConfigOverride,
+    #[serde(default)]
+    /// Per-pod TCP retransmission settings override.
+    pub tcp_pod_retrans: TcpPodRetransConfigOverride,
 }
 
 impl HostConfigOverride {
@@ -561,6 +655,8 @@ impl HostConfigOverride {
         self.cpu.apply_to(&mut runtime.cpu);
         self.network.apply_to(&mut runtime.network);
         self.disk_io.apply_to(&mut runtime.disk_io);
+        self.pod_discovery.apply_to(&mut runtime.pod_discovery);
+        self.tcp_pod_retrans.apply_to(&mut runtime.tcp_pod_retrans);
     }
 }
 
@@ -689,6 +785,41 @@ impl DiskIoConfigOverride {
     }
 }
 
+/// Partial override for pod discovery settings.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct PodDiscoveryConfigOverride {
+    /// Optional replacement for the CRI socket selection.
+    pub cri_socket: Option<String>,
+}
+
+impl PodDiscoveryConfigOverride {
+    fn apply_to(&self, pod_discovery: &mut PodDiscoveryConfig) {
+        if let Some(cri_socket) = &self.cri_socket {
+            pod_discovery.cri_socket.clone_from(cri_socket);
+        }
+    }
+}
+
+/// Partial override for per-pod TCP retransmission collector settings.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct TcpPodRetransConfigOverride {
+    /// Optional replacement for whether per-pod TCP retransmission collection is enabled.
+    pub enabled: Option<bool>,
+    /// Optional replacement for per-pod TCP retransmission collection interval seconds.
+    pub interval_seconds: Option<u64>,
+}
+
+impl TcpPodRetransConfigOverride {
+    fn apply_to(&self, tcp_pod_retrans: &mut TcpPodRetransConfig) {
+        if let Some(enabled) = self.enabled {
+            tcp_pod_retrans.enabled = enabled;
+        }
+        if let Some(interval) = self.interval_seconds {
+            tcp_pod_retrans.interval_seconds = interval;
+        }
+    }
+}
+
 /// Computes a stable version identifier for raw config file contents.
 pub fn config_source_version(contents: &str) -> String {
     format!("source-{:016x}", fnv1a64(contents.as_bytes()))
@@ -762,6 +893,14 @@ fn default_network_interval_seconds() -> u64 {
 
 fn default_disk_io_interval_seconds() -> u64 {
     DEFAULT_DISK_IO_INTERVAL_SECONDS
+}
+
+fn default_pod_discovery_cri_socket() -> String {
+    DEFAULT_POD_DISCOVERY_CRI_SOCKET.to_string()
+}
+
+fn default_tcp_pod_retrans_interval_seconds() -> u64 {
+    DEFAULT_TCP_POD_RETRANS_INTERVAL_SECONDS
 }
 
 fn validate_control_url(
@@ -1032,6 +1171,143 @@ mod tests {
 
         // Then: the assertions confirm that bootstrap config allows remote plaintext control urls when explicitly enabled.
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn pod_discovery_and_tcp_pod_retrans_have_expected_defaults() {
+        // Given: the scenario for pod discovery and tcp pod retrans defaults is prepared.
+        let config = AgentRuntimeConfig::default();
+
+        // When: the behavior under test runs.
+        let result = config.validate();
+
+        // Then: the assertions confirm the expected defaults.
+        assert_eq!(config.pod_discovery.cri_socket, "all");
+        assert!(!config.tcp_pod_retrans.enabled);
+        assert_eq!(config.tcp_pod_retrans.interval_seconds, 15);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn tcp_pod_retrans_interval_must_be_positive() {
+        // Given: the scenario for tcp pod retrans interval must be positive is prepared.
+        let config = AgentRuntimeConfig {
+            tcp_pod_retrans: TcpPodRetransConfig {
+                enabled: true,
+                interval_seconds: 0,
+            },
+            ..AgentRuntimeConfig::default()
+        };
+
+        // When: the behavior under test runs.
+        let result = config.validate();
+
+        // Then: the assertions confirm that tcp pod retrans interval must be positive.
+        assert!(matches!(
+            result,
+            Err(ConfigError::EmptyTcpPodRetransInterval)
+        ));
+    }
+
+    #[test]
+    fn pod_discovery_cri_socket_must_not_be_empty() {
+        // Given: the scenario for pod discovery cri socket must not be empty is prepared.
+        let config = AgentRuntimeConfig {
+            pod_discovery: PodDiscoveryConfig {
+                cri_socket: String::new(),
+            },
+            ..AgentRuntimeConfig::default()
+        };
+
+        // When: the behavior under test runs.
+        let result = config.validate();
+
+        // Then: the assertions confirm that pod discovery cri socket must not be empty.
+        assert!(matches!(
+            result,
+            Err(ConfigError::EmptyPodDiscoveryCriSocket)
+        ));
+    }
+
+    #[test]
+    fn toml_deserializes_pod_discovery_and_tcp_pod_retrans_sections() {
+        // Given: the scenario for TOML deserializes pod discovery sections is prepared.
+        let config: AgentRuntimeConfig = toml::from_str(
+            r#"
+            version = "test"
+
+            [pod_discovery]
+            cri_socket = "first"
+
+            [tcp_pod_retrans]
+            enabled = true
+            interval_seconds = 30
+            "#,
+        )
+        .expect("config should parse");
+
+        // When: the behavior under test runs.
+        let result = config.validate();
+
+        // Then: the assertions confirm the TOML sections deserialized.
+        assert_eq!(config.pod_discovery.cri_socket, "first");
+        assert!(config.tcp_pod_retrans.enabled);
+        assert_eq!(config.tcp_pod_retrans.interval_seconds, 30);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn bootstrap_fallback_carries_pod_discovery_and_tcp_pod_retrans() {
+        // Given: the scenario for bootstrap fallback carries pod settings is prepared.
+        let bootstrap: AgentBootstrapConfig = toml::from_str(
+            r#"
+            [pod_discovery]
+            cri_socket = "/run/crio/crio.sock"
+
+            [tcp_pod_retrans]
+            enabled = true
+            interval_seconds = 15
+            "#,
+        )
+        .expect("config should parse");
+
+        // When: the behavior under test runs.
+        let runtime = bootstrap.fallback_runtime_config();
+
+        // Then: the assertions confirm the fallback carries both sections.
+        assert_eq!(runtime.pod_discovery.cri_socket, "/run/crio/crio.sock");
+        assert!(runtime.tcp_pod_retrans.enabled);
+        assert_eq!(runtime.tcp_pod_retrans.interval_seconds, 15);
+        assert!(runtime.validate().is_ok());
+    }
+
+    #[test]
+    fn host_override_applies_pod_discovery_and_tcp_pod_retrans() {
+        // Given: the scenario for host override applies pod settings is prepared.
+        let config: ControlConfigFile = toml::from_str(
+            r#"
+            [defaults.pod_discovery]
+            cri_socket = "first"
+
+            [defaults.tcp_pod_retrans]
+            enabled = true
+            interval_seconds = 30
+
+            [hosts."prod-vps-1".tcp_pod_retrans]
+            interval_seconds = 60
+            "#,
+        )
+        .expect("config should parse");
+
+        // When: the behavior under test runs.
+        let runtime = config
+            .runtime_config_for("prod-vps-1")
+            .expect("runtime config should validate");
+
+        // Then: the assertions confirm the host override applied.
+        assert_eq!(runtime.pod_discovery.cri_socket, "first");
+        assert!(runtime.tcp_pod_retrans.enabled);
+        assert_eq!(runtime.tcp_pod_retrans.interval_seconds, 60);
     }
 
     #[test]
