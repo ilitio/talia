@@ -75,7 +75,7 @@ enum ProvidersAction {
     List,
     /// Print local fallback provider settings as TOML (all when omitted).
     Show {
-        /// Provider name, e.g. `tcp_pod_retrans`.
+        /// Provider name, e.g. `tcp`.
         provider: Option<String>,
     },
     /// Collect one provider's samples to stdout for a fixed duration.
@@ -594,11 +594,11 @@ fn show_provider_config(name: Option<&str>, path: Option<&Path>) -> Result<()> {
             "cpu" => toml::to_string_pretty(&config.cpu)?,
             "network" => toml::to_string_pretty(&config.network)?,
             "disk_io" => toml::to_string_pretty(&config.disk_io)?,
-            "tcp_pod_retrans" => toml::to_string_pretty(&config.tcp_pod_retrans)?,
+            "tcp" => toml::to_string_pretty(&config.tcp)?,
             _ => unreachable!("collector names are validated above"),
         };
         println!("\n[{name}]\n{}", body.trim_end());
-        if name == "tcp_pod_retrans" {
+        if name == "tcp" {
             let discovery = toml::to_string_pretty(&config.pod_discovery)?;
             println!("\n[pod_discovery]\n{}", discovery.trim_end());
         }

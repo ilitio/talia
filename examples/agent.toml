@@ -42,6 +42,6 @@ interval_seconds = 1
 # An explicit socket path also works, e.g. "/run/containerd/containerd.sock".
 cri_socket = "all"
 
-[tcp_pod_retrans]
+[tcp]
 enabled = false
 interval_seconds = 15
