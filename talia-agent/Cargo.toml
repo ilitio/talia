@@ -10,16 +10,22 @@ license = "MIT OR Apache-2.0"
 anyhow = "1.0.100"
 clap = { version = "4.6.1", features = ["derive", "env"] }
 futures-util = "0.3.32"
+http = "1.4.0"
 humantime = "2.3"
+hyper-util = { version = "0.1", features = ["tokio"] }
 opentelemetry = "0.33"
 opentelemetry-otlp = { version = "0.33", features = ["grpc-tonic", "metrics"] }
 opentelemetry_sdk = { version = "0.33", features = ["metrics", "rt-tokio"] }
+prost = "0.14"
 reqwest = { version = "0.12.26", default-features = false, features = ["json", "rustls-tls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 rustix = { version = "1.1.4", features = ["event", "fs", "param", "system"] }
 serde_json = "1.0.145"
 talia-core = { path = "../talia-core" }
 thiserror = "2.0.17"
+tonic = "0.14"
+tonic-prost = "0.14"
+tower-service = "0.3"
 tokio = { version = "1.52.3", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
 tracing = "0.1.41"
