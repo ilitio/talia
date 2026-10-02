@@ -20,7 +20,7 @@ use crate::modules::disk_io::DiskIoProvider;
 use crate::modules::memory::MemoryProvider;
 use crate::modules::network::NetworkProvider;
 use crate::modules::storage::StorageProvider;
-use crate::modules::tcp::provider::TcpPodRetransProvider;
+use crate::modules::tcp::provider::TcpProvider;
 
 /// Builds the provider for one collector. Called lazily on first enable and
 /// retried after load failures; receives the current collection interval.
@@ -97,14 +97,14 @@ pub fn collector_specs() -> Vec<CollectorSpec> {
             sleep_before_collect: true,
         },
         CollectorSpec {
-            name: "tcp_pod_retrans",
+            name: "tcp",
             schedule: |config| {
                 (
-                    config.tcp_pod_retrans.enabled,
-                    Duration::from_secs(config.tcp_pod_retrans.interval_seconds),
+                    config.tcp.enabled,
+                    Duration::from_secs(config.tcp.interval_seconds),
                 )
             },
-            factory: Box::new(|_| Ok(Box::new(TcpPodRetransProvider::new()) as Box<dyn Provider>)),
+            factory: Box::new(|_| Ok(Box::new(TcpProvider::new()) as Box<dyn Provider>)),
             // Point-in-time reader: the first collection only establishes
             // baselines, so no warm-up sleep is needed.
             sleep_before_collect: false,
@@ -243,14 +243,7 @@ mod tests {
         let names: Vec<_> = collector_specs().iter().map(|spec| spec.name).collect();
         assert_eq!(
             names,
-            [
-                "storage",
-                "memory",
-                "cpu",
-                "network",
-                "tcp_pod_retrans",
-                "disk_io"
-            ]
+            ["storage", "memory", "cpu", "network", "tcp", "disk_io"]
         );
     }
 }

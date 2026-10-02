@@ -67,9 +67,9 @@ The installed binary uses the same commands as `cargo run -p talia-agent --`:
 ```sh
 talia-agent run --config /etc/talia/talia-agent.toml
 talia-agent providers list
-talia-agent providers show tcp_pod_retrans --config /etc/talia/talia-agent.toml
+talia-agent providers show tcp --config /etc/talia/talia-agent.toml
 talia-agent providers show --config /etc/talia/talia-agent.toml
-talia-agent providers query tcp_pod_retrans --config /etc/talia/talia-agent.toml --for 30s --interval 5s
+talia-agent providers query tcp --config /etc/talia/talia-agent.toml --for 30s --interval 5s
 ```
 
 `run` starts the long-running agent and is the default command if omitted.
@@ -82,8 +82,8 @@ provider's `enabled` setting is `false`. Providers that measure rates may need
 at least one full interval before printing a sample.
 
 `providers show` prints the selected provider's resolved local fallback settings
-as TOML (or every provider when no name is given). The TCP retransmission
-provider also prints its shared `[pod_discovery]` settings. These commands do not
+as TOML (or every provider when no name is given). The `tcp` provider also
+prints its shared `[pod_discovery]` settings. These commands do not
 contact the control server or read the last-known config. The running agent may
 instead be using cached settings from `state_dir/last-config.json` or a newer
 remote config from the control server.
@@ -92,7 +92,7 @@ remote config from the control server.
 
 The local agent config is TOML; [examples/agent.toml](examples/agent.toml) is a
 complete starting point. Top-level keys configure the service, and tables such
-as `[storage]`, `[cpu]`, and `[tcp_pod_retrans]` configure provider fallback
+as `[storage]`, `[cpu]`, and `[tcp]` configure provider fallback
 settings. The `[pod_discovery]` table selects the CRI socket used by per-pod
 providers. `cri_socket = "all"` checks every reachable known socket, `"first"`
 uses the first reachable one, and an explicit path selects one socket. All
@@ -110,7 +110,7 @@ tables are optional; omitted fields get built-in defaults. The config bootstraps
 - optional eBPF CPU collector settings
 - optional eBPF network collector settings
 - optional eBPF disk I/O collector settings
-- optional per-pod TCP retransmission collector and CRI socket settings
+- optional TCP collector and CRI socket settings
 - memory pressure collector settings
 
 The control server config is TOML with defaults, optional agent enrollments, and
@@ -155,7 +155,7 @@ interval_seconds = 1
 [defaults.pod_discovery]
 cri_socket = "all"
 
-[defaults.tcp_pod_retrans]
+[defaults.tcp]
 enabled = false
 interval_seconds = 15
 
@@ -171,9 +171,13 @@ enabled = true
 [hosts."prod-vps-1".disk_io]
 enabled = true
 
-[hosts."prod-vps-1".tcp_pod_retrans]
+[hosts."prod-vps-1".tcp]
 enabled = true
 ```
+
+Existing `tcp_pod_retrans` sections remain readable in local and control-server
+TOML files and cached runtime JSON. New config output uses `tcp`. Upgrade agents
+before the control server so older agents do not miss the renamed runtime field.
 
 The agent fetches full config through:
 
@@ -210,7 +214,7 @@ Default intervals:
 - eBPF CPU collection window: `1s`
 - eBPF network collection window: `1s`
 - eBPF disk I/O collection window: `1s`
-- per-pod TCP retransmission collection: `15s` (disabled by default)
+- TCP collection: `15s` (disabled by default)
 - control heartbeat: `60s`
 - config polling fallback: `15m` plus deterministic per-agent jitter
 

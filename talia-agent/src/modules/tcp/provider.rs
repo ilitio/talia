@@ -1,5 +1,5 @@
 //! [`Provider`](talia_core::pipeline::Provider) implementation for per-pod
-//! TCP retransmission counters.
+//! TCP metrics read from pod network namespaces.
 //!
 //! Every interval the provider asks [`PodDiscovery`](crate::pod_discovery::PodDiscovery)
 //! for the pods on this node, reads `/proc/<pid>/net/snmp` and
@@ -58,18 +58,18 @@ struct PodBaseline {
     snapshot: TcpSnapshot,
 }
 
-/// Per-pod TCP retransmission provider.
+/// TCP provider with per-pod samples.
 ///
 /// Holds shared [`PodDiscovery`] and per-UID baselines. All failure modes
 /// are churn, never fatal: an unreachable CRI socket fails the collection
 /// (the runner logs and retries next interval), while a pod that vanished
 /// between discovery and reading is simply skipped.
-pub struct TcpPodRetransProvider {
+pub struct TcpProvider {
     discovery: PodDiscovery,
     previous: HashMap<PodUid, PodBaseline>,
 }
 
-impl TcpPodRetransProvider {
+impl TcpProvider {
     /// Creates the provider. Connections to the CRI sockets are lazy: the
     /// first [`collect`](Self::collect) dials them.
     pub fn new() -> Self {
@@ -88,15 +88,15 @@ impl TcpPodRetransProvider {
     }
 }
 
-impl Default for TcpPodRetransProvider {
+impl Default for TcpProvider {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Provider for TcpPodRetransProvider {
+impl Provider for TcpProvider {
     fn name(&self) -> &'static str {
-        "tcp_pod_retrans"
+        "tcp"
     }
 
     /// Picks up `cri_socket` changes without rebuilding the provider.
@@ -120,7 +120,7 @@ impl Provider for TcpPodRetransProvider {
         for pod in &pods {
             seen.push(pod.uid.clone());
             let Some(snapshot) = Self::read_pod_snapshot(pod.pid) else {
-                tracing::debug!(uid = %pod.uid, pid = pod.pid, "tcp_pod_retrans_unreadable");
+                tracing::debug!(uid = %pod.uid, pid = pod.pid, "tcp_unreadable");
                 continue;
             };
             let attributes = pod_attributes(pod);

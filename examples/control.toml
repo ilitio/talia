@@ -30,7 +30,7 @@ interval_seconds = 1
 [defaults.pod_discovery]
 cri_socket = "all"
 
-[defaults.tcp_pod_retrans]
+[defaults.tcp]
 enabled = false
 interval_seconds = 15
 
