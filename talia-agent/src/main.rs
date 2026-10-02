@@ -81,6 +81,9 @@ enum ProvidersAction {
     Show {
         /// Provider name, e.g. `tcp`.
         provider: Option<String>,
+        /// Override a provider setting, e.g. `--set interval_seconds=5`.
+        #[arg(long, value_name = "KEY=VALUE")]
+        set: Vec<String>,
     },
     /// Collect one provider's samples to stdout for a fixed duration.
     Query {
@@ -95,6 +98,9 @@ enum ProvidersAction {
         /// Only keep samples whose name starts with one of these prefixes.
         #[arg(long)]
         keep: Vec<String>,
+        /// Override a provider setting, e.g. `--set pod_discovery.cri_socket=all`.
+        #[arg(long, value_name = "KEY=VALUE")]
+        set: Vec<String>,
     },
 }
 
@@ -134,8 +140,8 @@ async fn run() -> Result<()> {
             return Ok(());
         },
         Some(Command::Providers {
-            action: ProvidersAction::Show { provider },
-        }) => return show_provider_config(provider.as_deref(), args.config.as_deref()),
+            action: ProvidersAction::Show { provider, set },
+        }) => return show_provider_config(provider.as_deref(), args.config.as_deref(), set),
         Some(Command::Providers {
             action:
                 ProvidersAction::Query {
@@ -143,9 +149,14 @@ async fn run() -> Result<()> {
                     r#for,
                     interval,
                     keep,
+                    set,
                 },
         }) => {
-            let config = load_local_runtime_config(args.config.as_deref())?;
+            let config = with_provider_overrides(
+                load_local_runtime_config(args.config.as_deref())?,
+                provider,
+                set,
+            )?;
             return query_provider(provider, *r#for, *interval, keep.clone(), &config).await;
         },
         Some(Command::Run) | None => {},
@@ -572,9 +583,85 @@ fn collector_spec(name: &str) -> Result<runner::CollectorSpec> {
         })
 }
 
+/// Applies CLI settings only to the selected provider (or its shared inputs).
+fn with_provider_overrides(
+    config: AgentRuntimeConfig,
+    provider: &str,
+    overrides: &[String],
+) -> Result<AgentRuntimeConfig> {
+    collector_spec(provider)?;
+    if overrides.is_empty() {
+        return Ok(config);
+    }
+    let mut value = serde_json::to_value(config).context("failed to serialize runtime config")?;
+    for assignment in overrides {
+        let (key, raw) = assignment
+            .split_once('=')
+            .with_context(|| format!("expected KEY=VALUE after --set, got '{assignment}'"))?;
+        let key = key.trim();
+        let raw = raw.trim();
+        anyhow::ensure!(
+            !key.is_empty() && !raw.is_empty(),
+            "invalid --set '{assignment}'"
+        );
+
+        let mut fields: Vec<&str> = key.split('.').collect();
+        let first = fields.first().copied();
+        let section =
+            if first == Some(provider) || (provider == "tcp" && first == Some("pod_discovery")) {
+                fields.remove(0)
+            } else {
+                provider
+            };
+        anyhow::ensure!(
+            !fields.is_empty() && fields.iter().all(|field| !field.is_empty()),
+            "invalid setting name '{key}'"
+        );
+        let mut target = value
+            .get_mut(section)
+            .with_context(|| format!("unknown provider config section '{section}'"))?;
+        for field in fields {
+            let table = target
+                .as_object_mut()
+                .with_context(|| format!("setting '{key}' is not a table"))?;
+            let available = table.keys().cloned().collect::<Vec<_>>().join(", ");
+            target = table.get_mut(field).with_context(|| {
+                format!(
+                    "unknown setting '{key}' for provider '{provider}'; available in [{section}]: {available}"
+                )
+            })?;
+        }
+        *target = if target.is_string() {
+            let string = if raw.starts_with('"') {
+                serde_json::from_str::<String>(raw)
+                    .with_context(|| format!("invalid quoted value for '{key}'"))?
+            } else {
+                raw.to_string()
+            };
+            serde_json::Value::String(string)
+        } else {
+            serde_json::from_str(raw)
+                .with_context(|| format!("invalid value for '{key}': expected a JSON literal"))?
+        };
+    }
+    let config: AgentRuntimeConfig =
+        serde_json::from_value(value).context("invalid provider settings from --set")?;
+    config
+        .validate()
+        .context("provider settings from --set are invalid")?;
+    Ok(config)
+}
+
 /// Prints provider settings from the local bootstrap file, including defaults.
-fn show_provider_config(name: Option<&str>, path: Option<&Path>) -> Result<()> {
-    let config = load_local_runtime_config(path)?;
+fn show_provider_config(name: Option<&str>, path: Option<&Path>, set: &[String]) -> Result<()> {
+    anyhow::ensure!(
+        name.is_some() || set.is_empty(),
+        "--set requires a provider name"
+    );
+    let mut config = load_local_runtime_config(path)?;
+    if let Some(name) = name {
+        config = with_provider_overrides(config, name, set)?;
+    }
     let names: Vec<&str> = match name {
         Some(name) => vec![collector_spec(name)?.name],
         None => runner::collector_specs()
@@ -590,6 +677,9 @@ fn show_provider_config(name: Option<&str>, path: Option<&Path>) -> Result<()> {
         None => println!(
             "# Built-in local fallback settings; a running agent may use cached or remote settings."
         ),
+    }
+    if !set.is_empty() {
+        println!("# Command-line --set values applied.");
     }
     for name in names {
         let body = match name {

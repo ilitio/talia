@@ -71,6 +71,12 @@ talia-agent providers list
 talia-agent providers show tcp --config /etc/talia/talia-agent.toml
 talia-agent providers show --config /etc/talia/talia-agent.toml
 talia-agent providers query tcp --config /etc/talia/talia-agent.toml --for 30s --interval 5s
+talia-agent providers show tcp --config tcp.toml \
+  --set interval_seconds=5 \
+  --set pod_discovery.cri_socket=/run/containerd/containerd.sock
+talia-agent providers query tcp --config tcp.toml --for 30s \
+  --set interval_seconds=5 \
+  --set pod_discovery.cri_socket=/run/containerd/containerd.sock
 ```
 
 `--version` prints the agent package version and also works after a subcommand.
@@ -89,6 +95,29 @@ prints its shared `[pod_discovery]` settings. These commands do not
 contact the control server or read the last-known config. The running agent may
 instead be using cached settings from `state_dir/last-config.json` or a newer
 remote config from the control server.
+
+A provider can use a small TOML file with just its own section and any shared
+input it needs. For example, `tcp.toml` can contain:
+
+```toml
+[tcp]
+enabled = true
+interval_seconds = 15
+
+[pod_discovery]
+cri_socket = "all"
+```
+
+Pass it with `--config` to either `providers show tcp` or `providers query tcp`.
+Repeat `--set KEY=VALUE` to override settings for the selected provider. Use
+unprefixed keys such as `interval_seconds=5`; `tcp.interval_seconds=5` also
+works. Shared TCP discovery uses `pod_discovery.cri_socket=...`. Strings can be
+plain text; use `true` or `false` for booleans, decimal numbers for intervals,
+and JSON array syntax for lists, for example `--set 'mounts=["/","/var"]'`
+for `storage`. Unknown keys and invalid values are rejected. The order is
+built-in defaults, then the TOML
+file, then `--set`; `providers query --interval` overrides the interval for that
+query only. An explicit query collects even if `enabled = false`.
 
 ## Runtime Config
 
