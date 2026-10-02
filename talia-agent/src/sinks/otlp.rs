@@ -37,6 +37,12 @@ use crate::modules::network::NETWORK_IO_SAMPLE;
 use crate::modules::storage::FILESYSTEM_LIMIT_SAMPLE;
 use crate::modules::storage::FILESYSTEM_USAGE_SAMPLE;
 use crate::modules::storage::FILESYSTEM_UTILIZATION_SAMPLE;
+use crate::modules::tcp::provider::TCP_ESTABLISHED_SAMPLE;
+use crate::modules::tcp::provider::TCP_FAST_RETRANSMITS_SAMPLE;
+use crate::modules::tcp::provider::TCP_RETRANSMITS_SAMPLE;
+use crate::modules::tcp::provider::TCP_SEGMENTS_RECEIVED_SAMPLE;
+use crate::modules::tcp::provider::TCP_SEGMENTS_SENT_SAMPLE;
+use crate::modules::tcp::provider::TCP_TIMEOUTS_SAMPLE;
 
 const SERVICE_NAME: &str = "talia-agent";
 const SERVICE_NAMESPACE: &str = "talia";
@@ -65,6 +71,12 @@ pub struct OtlpSink {
     disk_latency: Gauge<f64>,
     disk_queue_depth: Gauge<i64>,
     disk_in_flight_bytes: Gauge<i64>,
+    tcp_retransmits: Counter<u64>,
+    tcp_segments_sent: Counter<u64>,
+    tcp_segments_received: Counter<u64>,
+    tcp_timeouts: Counter<u64>,
+    tcp_fast_retransmits: Counter<u64>,
+    tcp_established: Gauge<u64>,
 }
 
 impl OtlpSink {
@@ -168,6 +180,38 @@ impl OtlpSink {
                 .with_unit("By")
                 .with_description("Current in-flight disk I/O bytes.")
                 .build(),
+            tcp_retransmits: meter
+                .u64_counter("system.network.tcp.retransmits")
+                .with_unit("{segment}")
+                .with_description("Per-pod TCP segments retransmitted during the interval.")
+                .build(),
+            tcp_segments_sent: meter
+                .u64_counter("system.network.tcp.segments.sent")
+                .with_unit("{segment}")
+                .with_description("Per-pod TCP segments sent during the interval.")
+                .build(),
+            tcp_segments_received: meter
+                .u64_counter("system.network.tcp.segments.received")
+                .with_unit("{segment}")
+                .with_description("Per-pod TCP segments received during the interval.")
+                .build(),
+            tcp_timeouts: meter
+                .u64_counter("system.network.tcp.timeouts")
+                .with_unit("{segment}")
+                .with_description(
+                    "Per-pod TCP segments retransmitted after timeout during the interval.",
+                )
+                .build(),
+            tcp_fast_retransmits: meter
+                .u64_counter("system.network.tcp.fast_retransmits")
+                .with_unit("{segment}")
+                .with_description("Per-pod TCP segments fast-retransmitted during the interval.")
+                .build(),
+            tcp_established: meter
+                .u64_gauge("system.network.tcp.connections.established")
+                .with_unit("{connection}")
+                .with_description("Per-pod TCP connections currently established.")
+                .build(),
         })
     }
 }
@@ -231,6 +275,24 @@ impl Sink for OtlpSink {
             },
             (DISK_IN_FLIGHT_BYTES_SAMPLE, SampleValue::GaugeI64(bytes)) => {
                 self.disk_in_flight_bytes.record(bytes, &attributes);
+            },
+            (TCP_RETRANSMITS_SAMPLE, SampleValue::Counter(segments)) => {
+                self.tcp_retransmits.add(segments, &attributes);
+            },
+            (TCP_SEGMENTS_SENT_SAMPLE, SampleValue::Counter(segments)) => {
+                self.tcp_segments_sent.add(segments, &attributes);
+            },
+            (TCP_SEGMENTS_RECEIVED_SAMPLE, SampleValue::Counter(segments)) => {
+                self.tcp_segments_received.add(segments, &attributes);
+            },
+            (TCP_TIMEOUTS_SAMPLE, SampleValue::Counter(segments)) => {
+                self.tcp_timeouts.add(segments, &attributes);
+            },
+            (TCP_FAST_RETRANSMITS_SAMPLE, SampleValue::Counter(segments)) => {
+                self.tcp_fast_retransmits.add(segments, &attributes);
+            },
+            (TCP_ESTABLISHED_SAMPLE, SampleValue::GaugeU64(connections)) => {
+                self.tcp_established.record(connections, &attributes);
             },
             (name, _) => {
                 tracing::warn!(sample_name = %name, "talia_unknown_sample_dropped");

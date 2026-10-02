@@ -20,6 +20,7 @@ use crate::modules::disk_io::DiskIoProvider;
 use crate::modules::memory::MemoryProvider;
 use crate::modules::network::NetworkProvider;
 use crate::modules::storage::StorageProvider;
+use crate::modules::tcp::provider::TcpPodRetransProvider;
 
 /// Builds the provider for one collector. Called lazily on first enable and
 /// retried after load failures; receives the current collection interval.
@@ -96,6 +97,19 @@ pub fn collector_specs() -> Vec<CollectorSpec> {
             sleep_before_collect: true,
         },
         CollectorSpec {
+            name: "tcp_pod_retrans",
+            schedule: |config| {
+                (
+                    config.tcp_pod_retrans.enabled,
+                    Duration::from_secs(config.tcp_pod_retrans.interval_seconds),
+                )
+            },
+            factory: Box::new(|_| Ok(Box::new(TcpPodRetransProvider::new()) as Box<dyn Provider>)),
+            // Point-in-time reader: the first collection only establishes
+            // baselines, so no warm-up sleep is needed.
+            sleep_before_collect: false,
+        },
+        CollectorSpec {
             name: "disk_io",
             schedule: |config| {
                 (
@@ -159,12 +173,37 @@ pub async fn run_collector(
         if spec.sleep_before_collect {
             tokio::time::sleep(interval).await;
         }
-        let Some(provider) = provider.as_mut() else {
+        let Some(mut taken) = provider.take() else {
             continue;
         };
-        provider.set_window(interval);
-        provider.reconfigure(&config);
-        match provider.collect() {
+        taken.set_window(interval);
+        taken.reconfigure(&config);
+        // `collect()` is synchronous and may block (procfs reads, eBPF
+        // syscalls, pod discovery's CRI worker): run it on the blocking
+        // pool so the async workers never stall.
+        let (taken, result) = match tokio::task::spawn_blocking(move || {
+            let result = taken.collect();
+            (taken, result)
+        })
+        .await
+        {
+            Ok(pair) => pair,
+            Err(join_error) => {
+                tracing::error!(
+                    collector = spec.name,
+                    %join_error,
+                    "talia_collector_panicked"
+                );
+                // The provider went down with the panicked task; sleep,
+                // then let the next iteration recreate it.
+                if !spec.sleep_before_collect {
+                    tokio::time::sleep(interval).await;
+                }
+                continue;
+            },
+        };
+        provider = Some(taken);
+        match result {
             Ok(samples) => {
                 let mut kept = 0;
                 for sample in samples {
@@ -202,6 +241,16 @@ mod tests {
     #[test]
     fn registry_lists_every_provider_once() {
         let names: Vec<_> = collector_specs().iter().map(|spec| spec.name).collect();
-        assert_eq!(names, ["storage", "memory", "cpu", "network", "disk_io"]);
+        assert_eq!(
+            names,
+            [
+                "storage",
+                "memory",
+                "cpu",
+                "network",
+                "tcp_pod_retrans",
+                "disk_io"
+            ]
+        );
     }
 }
