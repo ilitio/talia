@@ -77,6 +77,11 @@ enum Command {
 enum ProvidersAction {
     /// List available provider names.
     List,
+    /// List a provider's accepted settings, value formats, and built-in defaults.
+    Describe {
+        /// Provider name (see `providers list`).
+        provider: String,
+    },
     /// Print local fallback provider settings as TOML (all when omitted).
     Show {
         /// Provider name, e.g. `tcp`.
@@ -139,6 +144,9 @@ async fn run() -> Result<()> {
             }
             return Ok(());
         },
+        Some(Command::Providers {
+            action: ProvidersAction::Describe { provider },
+        }) => return describe_provider(provider),
         Some(Command::Providers {
             action: ProvidersAction::Show { provider, set },
         }) => return show_provider_config(provider.as_deref(), args.config.as_deref(), set),
@@ -581,6 +589,51 @@ fn collector_spec(name: &str) -> Result<runner::CollectorSpec> {
                 known.join(", ")
             )
         })
+}
+
+/// Prints the keys accepted by --set and the equivalent TOML sections.
+fn describe_provider(name: &str) -> Result<()> {
+    collector_spec(name)?;
+    let defaults = serde_json::to_value(AgentRuntimeConfig::default())
+        .context("failed to serialize provider defaults")?;
+    println!("Provider: {name}");
+    println!("Accepted --set KEY=VALUE settings (built-in defaults):");
+
+    let mut sections = vec![(name, "")];
+    if name == "tcp" {
+        sections.push(("pod_discovery", "pod_discovery."));
+    }
+    for (section, prefix) in sections {
+        let fields = defaults
+            .get(section)
+            .and_then(serde_json::Value::as_object)
+            .with_context(|| format!("missing [{section}] provider defaults"))?;
+        for (field, default) in fields {
+            let format = match (section, field.as_str()) {
+                (_, "enabled") => "true | false",
+                (_, "interval_seconds") => "positive integer (seconds)",
+                ("storage", "mounts") => "JSON array of absolute paths",
+                ("pod_discovery", "cri_socket") => "all | first | socket path",
+                _ => anyhow::bail!("undocumented [{section}].{field} setting"),
+            };
+            let default = default
+                .as_str()
+                .map_or_else(|| default.to_string(), str::to_string);
+            println!("  {prefix}{field}: {format} (default: {default})");
+        }
+    }
+    if name == "storage" {
+        println!("  mounts must contain at least one path when enabled.");
+    }
+    println!(
+        "Use these keys with `providers show {name} --set` or `providers query {name} --set`."
+    );
+    println!("Provider keys may also use the `{name}.` prefix with --set.");
+    println!("In TOML, put provider keys under [{name}].");
+    if name == "tcp" {
+        println!("Put pod_discovery.cri_socket under [pod_discovery] in TOML.");
+    }
+    Ok(())
 }
 
 /// Applies CLI settings only to the selected provider (or its shared inputs).
