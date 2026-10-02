@@ -36,3 +36,12 @@ interval_seconds = 1
 [disk_io]
 enabled = false
 interval_seconds = 1
+
+[pod_discovery]
+# "all" checks every reachable known CRI socket; "first" uses the first one.
+# An explicit socket path also works, e.g. "/run/containerd/containerd.sock".
+cri_socket = "all"
+
+[tcp_pod_retrans]
+enabled = false
+interval_seconds = 15

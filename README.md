@@ -50,7 +50,7 @@ export TALIA_AGENT_CONFIG_TOKEN=replace-with-agent-secret
 export OTEL_EXPORTER_OTLP_HEADERS=authorization=<otlp-authorization-value>
 export OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=development
 cargo run -p talia-agent -- \
-  --config examples/agent.toml
+  run --config examples/agent.toml
 ```
 
 The OTLP endpoint comes from the agent config. OTLP authorization uses the
@@ -60,9 +60,43 @@ consistent with the webserver setup. Set `OTEL_RESOURCE_ATTRIBUTES` to
 `deployment.environment.name=production` in each deployed agent's environment
 file. Talia always adds `service.namespace=talia` itself.
 
+### Agent CLI
+
+The installed binary uses the same commands as `cargo run -p talia-agent --`:
+
+```sh
+talia-agent run --config /etc/talia/talia-agent.toml
+talia-agent providers list
+talia-agent providers show tcp_pod_retrans --config /etc/talia/talia-agent.toml
+talia-agent providers show --config /etc/talia/talia-agent.toml
+talia-agent providers query tcp_pod_retrans --config /etc/talia/talia-agent.toml --for 30s --interval 5s
+```
+
+`run` starts the long-running agent and is the default command if omitted.
+`--config` accepts a local TOML file in any command position; alternatively set
+`TALIA_AGENT_CONFIG`. Without either, built-in defaults apply. The `run` command
+exports to the configured OTLP endpoint. `providers query` runs one provider
+directly and prints JSON samples to stdout; it uses the provider's configured
+interval unless `--interval` overrides it. An explicit query runs even when the
+provider's `enabled` setting is `false`. Providers that measure rates may need
+at least one full interval before printing a sample.
+
+`providers show` prints the selected provider's resolved local fallback settings
+as TOML (or every provider when no name is given). The TCP retransmission
+provider also prints its shared `[pod_discovery]` settings. These commands do not
+contact the control server or read the last-known config. The running agent may
+instead be using cached settings from `state_dir/last-config.json` or a newer
+remote config from the control server.
+
 ## Runtime Config
 
-The local agent config bootstraps:
+The local agent config is TOML; [examples/agent.toml](examples/agent.toml) is a
+complete starting point. Top-level keys configure the service, and tables such
+as `[storage]`, `[cpu]`, and `[tcp_pod_retrans]` configure provider fallback
+settings. The `[pod_discovery]` table selects the CRI socket used by per-pod
+providers. `cri_socket = "all"` checks every reachable known socket, `"first"`
+uses the first reachable one, and an explicit path selects one socket. All
+tables are optional; omitted fields get built-in defaults. The config bootstraps:
 
 - control HTTP URL
 - control WebSocket URL
@@ -76,6 +110,7 @@ The local agent config bootstraps:
 - optional eBPF CPU collector settings
 - optional eBPF network collector settings
 - optional eBPF disk I/O collector settings
+- optional per-pod TCP retransmission collector and CRI socket settings
 - memory pressure collector settings
 
 The control server config is TOML with defaults, optional agent enrollments, and
@@ -117,6 +152,13 @@ interval_seconds = 1
 enabled = false
 interval_seconds = 1
 
+[defaults.pod_discovery]
+cri_socket = "all"
+
+[defaults.tcp_pod_retrans]
+enabled = false
+interval_seconds = 15
+
 [hosts."prod-vps-1".storage]
 mounts = ["/", "/var/lib/docker"]
 
@@ -127,6 +169,9 @@ enabled = true
 enabled = true
 
 [hosts."prod-vps-1".disk_io]
+enabled = true
+
+[hosts."prod-vps-1".tcp_pod_retrans]
 enabled = true
 ```
 
@@ -165,6 +210,7 @@ Default intervals:
 - eBPF CPU collection window: `1s`
 - eBPF network collection window: `1s`
 - eBPF disk I/O collection window: `1s`
+- per-pod TCP retransmission collection: `15s` (disabled by default)
 - control heartbeat: `60s`
 - config polling fallback: `15m` plus deterministic per-agent jitter
 
