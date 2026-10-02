@@ -65,6 +65,7 @@ file. Talia always adds `service.namespace=talia` itself.
 The installed binary uses the same commands as `cargo run -p talia-agent --`:
 
 ```sh
+talia-agent --version
 talia-agent run --config /etc/talia/talia-agent.toml
 talia-agent providers list
 talia-agent providers show tcp_pod_retrans --config /etc/talia/talia-agent.toml
@@ -72,6 +73,7 @@ talia-agent providers show --config /etc/talia/talia-agent.toml
 talia-agent providers query tcp_pod_retrans --config /etc/talia/talia-agent.toml --for 30s --interval 5s
 ```
 
+`--version` prints the agent package version and also works after a subcommand.
 `run` starts the long-running agent and is the default command if omitted.
 `--config` accepts a local TOML file in any command position; alternatively set
 `TALIA_AGENT_CONFIG`. Without either, built-in defaults apply. The `run` command

@@ -47,7 +47,11 @@ const AGENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const LAST_KNOWN_CONFIG_FILE: &str = "last-config.json";
 
 #[derive(Parser)]
-#[command(about = "Talia host monitoring agent")]
+#[command(
+    about = "Talia host monitoring agent",
+    version,
+    propagate_version = true
+)]
 struct Args {
     /// Local TOML file for agent bootstrap and fallback provider settings.
     #[arg(long, global = true, env = "TALIA_AGENT_CONFIG")]
