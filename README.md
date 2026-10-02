@@ -68,6 +68,7 @@ The installed binary uses the same commands as `cargo run -p talia-agent --`:
 talia-agent --version
 talia-agent run --config /etc/talia/talia-agent.toml
 talia-agent providers list
+talia-agent providers describe tcp
 talia-agent providers show tcp --config /etc/talia/talia-agent.toml
 talia-agent providers show --config /etc/talia/talia-agent.toml
 talia-agent providers query tcp --config /etc/talia/talia-agent.toml --for 30s --interval 5s
@@ -95,6 +96,10 @@ prints its shared `[pod_discovery]` settings. These commands do not
 contact the control server or read the last-known config. The running agent may
 instead be using cached settings from `state_dir/last-config.json` or a newer
 remote config from the control server.
+
+`providers describe <name>` lists the keys accepted by `--set`, their value
+formats, and built-in defaults. It also names the TOML sections for those keys.
+Use `providers show <name> --config <file>` to see values from a local file.
 
 A provider can use a small TOML file with just its own section and any shared
 input it needs. For example, `tcp.toml` can contain:
