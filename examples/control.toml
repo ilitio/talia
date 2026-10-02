@@ -27,6 +27,13 @@ interval_seconds = 1
 enabled = false
 interval_seconds = 1
 
+[defaults.pod_discovery]
+cri_socket = "all"
+
+[defaults.tcp_pod_retrans]
+enabled = false
+interval_seconds = 15
+
 # Example host-specific override for a container host. This still monitors host
 # filesystems only; container runtime storage metrics are a later collector.
 [hosts."prod-vps-1".storage]

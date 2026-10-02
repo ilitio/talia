@@ -49,7 +49,8 @@ const LAST_KNOWN_CONFIG_FILE: &str = "last-config.json";
 #[derive(Parser)]
 #[command(about = "Talia host monitoring agent")]
 struct Args {
-    #[arg(long, env = "TALIA_AGENT_CONFIG")]
+    /// Local TOML file for agent bootstrap and fallback provider settings.
+    #[arg(long, global = true, env = "TALIA_AGENT_CONFIG")]
     config: Option<PathBuf>,
     #[arg(long, default_value = "info")]
     log_filter: String,
@@ -66,32 +67,31 @@ enum Command {
         #[command(subcommand)]
         action: ProvidersAction,
     },
-    /// Collect one provider's samples to stdout for a fixed duration.
-    Query {
-        /// Provider name, e.g. `cpu` (see `providers list`).
-        provider: String,
-        /// How long to collect, e.g. `30s`, `5m`.
-        #[arg(long, value_parser = humantime::parse_duration)]
-        r#for: Duration,
-        /// Collection interval, e.g. `5s`.
-        #[arg(long, default_value = "5s", value_parser = humantime::parse_duration)]
-        interval: Duration,
-        /// Only keep samples whose name starts with one of these prefixes.
-        /// Repeatable, e.g. `--keep system.cpu. --keep system.memory.`.
-        #[arg(long)]
-        keep: Vec<String>,
-    },
-    /// Load a provider and run one collection, reporting success or failure.
-    Check {
-        /// Provider name, e.g. `cpu` (see `providers list`).
-        provider: String,
-    },
 }
 
 #[derive(Subcommand)]
 enum ProvidersAction {
     /// List available provider names.
     List,
+    /// Print local fallback provider settings as TOML (all when omitted).
+    Show {
+        /// Provider name, e.g. `tcp_pod_retrans`.
+        provider: Option<String>,
+    },
+    /// Collect one provider's samples to stdout for a fixed duration.
+    Query {
+        /// Provider name (see `providers list`).
+        provider: String,
+        /// How long to collect, e.g. `30s`, `5m`.
+        #[arg(long, value_parser = humantime::parse_duration)]
+        r#for: Duration,
+        /// Collection interval; defaults to the provider's local setting.
+        #[arg(long, value_parser = humantime::parse_duration)]
+        interval: Option<Duration>,
+        /// Only keep samples whose name starts with one of these prefixes.
+        #[arg(long)]
+        keep: Vec<String>,
+    },
 }
 
 #[derive(Clone)]
@@ -119,7 +119,7 @@ async fn run() -> Result<()> {
         .with_env_filter(EnvFilter::new(args.log_filter))
         .init();
 
-    // One-shot CLI modes run standalone, without the service bootstrap.
+    // Provider CLI modes use local fallback settings without starting the service.
     match &args.command {
         Some(Command::Providers {
             action: ProvidersAction::List,
@@ -129,39 +129,31 @@ async fn run() -> Result<()> {
             }
             return Ok(());
         },
-        Some(Command::Query {
-            provider,
-            r#for,
-            interval,
-            keep,
+        Some(Command::Providers {
+            action: ProvidersAction::Show { provider },
+        }) => return show_provider_config(provider.as_deref(), args.config.as_deref()),
+        Some(Command::Providers {
+            action:
+                ProvidersAction::Query {
+                    provider,
+                    r#for,
+                    interval,
+                    keep,
+                },
         }) => {
-            return query_provider(provider, *r#for, *interval, keep.clone()).await;
-        },
-        Some(Command::Check { provider }) => {
-            return check_provider(provider).await;
+            let config = load_local_runtime_config(args.config.as_deref())?;
+            return query_provider(provider, *r#for, *interval, keep.clone(), &config).await;
         },
         Some(Command::Run) | None => {},
     }
 
-    let mut bootstrap = match &args.config {
-        Some(path) => AgentBootstrapConfig::load(path)
-            .with_context(|| format!("failed to load agent config {}", path.display()))?,
-        None => AgentBootstrapConfig::default(),
-    };
+    let mut bootstrap = load_bootstrap_config(args.config.as_deref())?;
     if let Some(token) = optional_env_secret("TALIA_CONTROL_TOKEN")? {
         bootstrap.control_token = Some(token);
     }
     if let Some(token) = optional_env_secret("TALIA_AGENT_CONFIG_TOKEN")? {
         bootstrap.agent_config_token = Some(token);
     }
-    bootstrap
-        .validate()
-        .context("agent bootstrap config is invalid")?;
-    bootstrap
-        .fallback_runtime_config()
-        .validate()
-        .context("local fallback runtime config is invalid")?;
-
     let identity = AgentIdentity {
         agent_id: identity::load_or_create_agent_id(&bootstrap.state_dir)
             .context("failed to load or create Talia agent id")?,
@@ -228,6 +220,22 @@ async fn run() -> Result<()> {
         .context("failed to listen for shutdown signal")?;
     tracing::info!("talia_agent_shutdown_signal");
     Ok(())
+}
+
+fn load_bootstrap_config(path: Option<&Path>) -> Result<AgentBootstrapConfig> {
+    let bootstrap = match path {
+        Some(path) => AgentBootstrapConfig::load(path)
+            .with_context(|| format!("failed to load agent config {}", path.display()))?,
+        None => AgentBootstrapConfig::default(),
+    };
+    bootstrap
+        .validate()
+        .context("agent bootstrap config is invalid")?;
+    Ok(bootstrap)
+}
+
+fn load_local_runtime_config(path: Option<&Path>) -> Result<AgentRuntimeConfig> {
+    Ok(load_bootstrap_config(path)?.fallback_runtime_config())
 }
 
 async fn config_poll_loop(
@@ -560,17 +568,62 @@ fn collector_spec(name: &str) -> Result<runner::CollectorSpec> {
         })
 }
 
+/// Prints provider settings from the local bootstrap file, including defaults.
+fn show_provider_config(name: Option<&str>, path: Option<&Path>) -> Result<()> {
+    let config = load_local_runtime_config(path)?;
+    let names: Vec<&str> = match name {
+        Some(name) => vec![collector_spec(name)?.name],
+        None => runner::collector_specs()
+            .iter()
+            .map(|spec| spec.name)
+            .collect(),
+    };
+    match path {
+        Some(path) => println!(
+            "# Local fallback settings from {} (including defaults); a running agent may use cached or remote settings.",
+            path.display()
+        ),
+        None => println!(
+            "# Built-in local fallback settings; a running agent may use cached or remote settings."
+        ),
+    }
+    for name in names {
+        let body = match name {
+            "storage" => toml::to_string_pretty(&config.storage)?,
+            "memory" => toml::to_string_pretty(&config.memory)?,
+            "cpu" => toml::to_string_pretty(&config.cpu)?,
+            "network" => toml::to_string_pretty(&config.network)?,
+            "disk_io" => toml::to_string_pretty(&config.disk_io)?,
+            "tcp_pod_retrans" => toml::to_string_pretty(&config.tcp_pod_retrans)?,
+            _ => unreachable!("collector names are validated above"),
+        };
+        println!("\n[{name}]\n{}", body.trim_end());
+        if name == "tcp_pod_retrans" {
+            let discovery = toml::to_string_pretty(&config.pod_discovery)?;
+            println!("\n[pod_discovery]\n{}", discovery.trim_end());
+        }
+    }
+    Ok(())
+}
+
 /// Collects one provider's samples to stdout for the given duration,
 /// bpftrace-style.
 async fn query_provider(
     name: &str,
     duration: Duration,
-    interval: Duration,
+    interval: Option<Duration>,
     keep: Vec<String>,
+    config: &AgentRuntimeConfig,
 ) -> Result<()> {
     let mut spec = collector_spec(name)?;
+    let interval = interval.unwrap_or_else(|| (spec.schedule)(config).1);
+    anyhow::ensure!(
+        !interval.is_zero(),
+        "query interval must be greater than zero"
+    );
     let mut provider =
         (spec.factory)(interval).with_context(|| format!("failed to load provider '{name}'"))?;
+    provider.reconfigure(config);
     let processors: Vec<Arc<dyn Processor>> = if keep.is_empty() {
         Vec::new()
     } else {
@@ -578,6 +631,8 @@ async fn query_provider(
     };
     let sink = StdoutSink::new();
     let start = std::time::Instant::now();
+    let mut collected = false;
+    let mut last_error = None;
     loop {
         if spec.sleep_before_collect {
             tokio::time::sleep(interval).await;
@@ -585,6 +640,7 @@ async fn query_provider(
         provider.set_window(interval);
         match provider.collect() {
             Ok(samples) => {
+                collected = true;
                 for sample in samples {
                     if let Some(sample) = process_sample(&processors, sample) {
                         sink.emit(&sample, "query");
@@ -593,32 +649,22 @@ async fn query_provider(
             },
             Err(error) => {
                 tracing::warn!(provider = name, error = %error, "talia_query_collection_failed");
+                last_error = Some(error.to_string());
             },
         }
         if start.elapsed() >= duration {
             break;
         }
         if !spec.sleep_before_collect {
-            tokio::time::sleep(interval).await;
+            tokio::time::sleep(interval.min(duration.saturating_sub(start.elapsed()))).await;
         }
     }
-    Ok(())
-}
-
-/// Loads a provider and runs one collection, reporting success or failure.
-async fn check_provider(name: &str) -> Result<()> {
-    let mut spec = collector_spec(name)?;
-    let interval = Duration::from_secs(5);
-    let mut provider =
-        (spec.factory)(interval).with_context(|| format!("failed to load provider '{name}'"))?;
-    if spec.sleep_before_collect {
-        tokio::time::sleep(interval).await;
+    if !collected {
+        anyhow::bail!(
+            "provider '{name}' did not collect successfully: {}",
+            last_error.unwrap_or_else(|| "no collection was attempted".to_string())
+        );
     }
-    provider.set_window(interval);
-    let samples = provider
-        .collect()
-        .with_context(|| format!("provider '{name}' collection failed"))?;
-    println!("ok: provider '{name}' returned {} samples", samples.len());
     Ok(())
 }
 

@@ -23,6 +23,7 @@ rustix = { version = "1.1.4", features = ["event", "fs", "param", "system"] }
 serde_json = "1.0.145"
 talia-core = { path = "../talia-core" }
 thiserror = "2.0.17"
+toml = "0.9"
 tonic = "0.14"
 tonic-prost = "0.14"
 tower-service = "0.3"
