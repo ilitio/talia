@@ -24,6 +24,8 @@ pub(crate) struct Args {
 pub(crate) enum Command {
     /// Run the agent service.
     Run,
+    /// Collect one provider's samples to stdout for a fixed duration.
+    Collect(CollectArgs),
     /// Work with data providers.
     Providers {
         #[command(subcommand)]
@@ -45,23 +47,6 @@ pub(crate) enum ProvidersAction {
         #[command(subcommand)]
         action: ProviderConfigAction,
     },
-    /// Collect one provider's samples to stdout for a fixed duration.
-    Query {
-        /// Provider name (see `providers list`).
-        provider: String,
-        /// How long to collect, e.g. `30s`, `5m`.
-        #[arg(long, value_parser = humantime::parse_duration)]
-        r#for: Duration,
-        /// Collection interval; defaults to the provider's local setting.
-        #[arg(long, value_parser = humantime::parse_duration)]
-        interval: Option<Duration>,
-        /// Only keep samples whose name starts with one of these prefixes.
-        #[arg(long)]
-        keep: Vec<String>,
-        /// Override a provider setting, e.g. `--set pod_discovery.cri_socket=all`.
-        #[arg(long, value_name = "KEY=VALUE")]
-        set: Vec<String>,
-    },
 }
 
 #[derive(Subcommand)]
@@ -75,6 +60,24 @@ pub(crate) struct ProviderShowArgs {
     /// Provider name, e.g. `tcp` (all providers when omitted).
     pub(crate) provider: Option<String>,
     /// Temporarily override a setting in this preview; does not save it.
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub(crate) set: Vec<String>,
+}
+
+#[derive(clap::Args)]
+pub(crate) struct CollectArgs {
+    /// Provider name (see `providers list`).
+    pub(crate) provider: String,
+    /// How long to collect, e.g. `30s`, `5m`.
+    #[arg(long, value_parser = humantime::parse_duration)]
+    pub(crate) r#for: Duration,
+    /// Collection interval; defaults to the provider's local setting.
+    #[arg(long, value_parser = humantime::parse_duration)]
+    pub(crate) interval: Option<Duration>,
+    /// Only keep samples whose name starts with one of these prefixes.
+    #[arg(long)]
+    pub(crate) keep: Vec<String>,
+    /// Temporarily override a provider setting for this collection.
     #[arg(long, value_name = "KEY=VALUE")]
     pub(crate) set: Vec<String>,
 }

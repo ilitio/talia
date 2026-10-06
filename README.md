@@ -71,11 +71,11 @@ talia-agent providers list
 talia-agent providers describe tcp
 talia-agent providers config show tcp --config /etc/talia/talia-agent.toml
 talia-agent providers config show --config /etc/talia/talia-agent.toml
-talia-agent providers query tcp --config /etc/talia/talia-agent.toml --for 30s --interval 5s
+talia-agent collect tcp --config /etc/talia/talia-agent.toml --for 30s --interval 5s
 talia-agent providers config show tcp --config tcp.toml \
   --set interval_seconds=5 \
   --set pod_discovery.cri_socket=/run/containerd/containerd.sock
-talia-agent providers query tcp --config tcp.toml --for 30s \
+talia-agent collect tcp --config tcp.toml --for 30s \
   --set interval_seconds=5 \
   --set pod_discovery.cri_socket=/run/containerd/containerd.sock
 ```
@@ -85,11 +85,11 @@ talia-agent providers query tcp --config tcp.toml --for 30s \
 starting the service requires an explicit `run`.
 `--config` accepts a local TOML file in any command position; alternatively set
 `TALIA_AGENT_CONFIG`. Without either, built-in defaults apply. The `run` command
-exports to the configured OTLP endpoint. `providers query` runs one provider
-directly and prints JSON samples to stdout; it uses the provider's configured
-interval unless `--interval` overrides it. An explicit query runs even when the
-provider's `enabled` setting is `false`. Providers that measure rates may need
-at least one full interval before printing a sample.
+exports to the configured OTLP endpoint. `collect` runs one provider in the
+foreground and prints JSON samples to stdout; it uses the provider's configured
+interval unless `--interval` overrides it. An explicit collection runs even
+when the provider's `enabled` setting is `false`. Providers that measure rates
+may need at least one full interval before printing a sample.
 
 `providers config show` prints the selected provider's resolved local fallback
 settings as TOML (or every provider when no name is given). The `tcp` provider
@@ -115,7 +115,7 @@ interval_seconds = 15
 cri_socket = "all"
 ```
 
-Pass it with `--config` to either `providers config show tcp` or `providers query tcp`.
+Pass it with `--config` to either `providers config show tcp` or `collect tcp`.
 Repeat `--set KEY=VALUE` to override settings for the selected provider. Use
 unprefixed keys such as `interval_seconds=5`; `tcp.interval_seconds=5` also
 works. Shared TCP discovery uses `pod_discovery.cri_socket=...`. Strings can be
@@ -123,8 +123,8 @@ plain text; use `true` or `false` for booleans, decimal numbers for intervals,
 and JSON array syntax for lists, for example `--set 'mounts=["/","/var"]'`
 for `storage`. Unknown keys and invalid values are rejected. The order is
 built-in defaults, then the TOML
-file, then `--set`; `providers query --interval` overrides the interval for that
-query only. An explicit query collects even if `enabled = false`.
+file, then `--set`; `collect --interval` overrides the interval for that
+collection only. An explicit collection runs even if `enabled = false`.
 
 ## Runtime Config
 

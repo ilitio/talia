@@ -11,36 +11,43 @@ use talia_core::pipeline::Processor;
 use talia_core::pipeline::Sink;
 use talia_core::pipeline::process_sample;
 
-use super::config::collector_spec;
-use super::config::with_provider_overrides;
+use super::providers::config::collector_spec;
+use super::providers::config::with_provider_overrides;
+use crate::cli::CollectArgs;
 use crate::local_config::load_local_runtime_config;
 
-pub(crate) async fn execute(
-    name: &str,
-    duration: Duration,
-    interval: Option<Duration>,
-    keep: Vec<String>,
-    set: &[String],
-    path: Option<&Path>,
-) -> Result<()> {
-    let config = with_provider_overrides(load_local_runtime_config(path)?, name, set)?;
-    query_provider(name, duration, interval, keep, &config).await
+pub(crate) async fn execute(collect: &CollectArgs, path: Option<&Path>) -> Result<()> {
+    let config = with_provider_overrides(
+        load_local_runtime_config(path)?,
+        &collect.provider,
+        &collect.set,
+    )?;
+    let sink = StdoutSink::new();
+    collect_provider(
+        &collect.provider,
+        collect.r#for,
+        collect.interval,
+        collect.keep.clone(),
+        &sink,
+        &config,
+    )
+    .await
 }
 
-/// Collects one provider's samples to stdout for the given duration,
-/// bpftrace-style.
-async fn query_provider(
+/// Collects one provider's samples into a sink for the given duration.
+async fn collect_provider(
     name: &str,
     duration: Duration,
     interval: Option<Duration>,
     keep: Vec<String>,
+    sink: &dyn Sink,
     config: &AgentRuntimeConfig,
 ) -> Result<()> {
     let mut spec = collector_spec(name)?;
     let interval = interval.unwrap_or_else(|| (spec.schedule)(config).1);
     anyhow::ensure!(
         !interval.is_zero(),
-        "query interval must be greater than zero"
+        "collection interval must be greater than zero"
     );
     let mut provider =
         (spec.factory)(interval).with_context(|| format!("failed to load provider '{name}'"))?;
@@ -50,7 +57,6 @@ async fn query_provider(
     } else {
         vec![Arc::new(NameFilter::new(keep))]
     };
-    let sink = StdoutSink::new();
     let start = std::time::Instant::now();
     let mut collected = false;
     let mut last_error = None;
@@ -64,12 +70,12 @@ async fn query_provider(
                 collected = true;
                 for sample in samples {
                     if let Some(sample) = process_sample(&processors, sample) {
-                        sink.emit(&sample, "query");
+                        sink.emit(&sample, &config.version);
                     }
                 }
             },
             Err(error) => {
-                tracing::warn!(provider = name, error = %error, "talia_query_collection_failed");
+                tracing::warn!(provider = name, error = %error, "talia_collection_failed");
                 last_error = Some(error.to_string());
             },
         }

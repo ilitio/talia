@@ -47,23 +47,9 @@ async fn dispatch_command() -> Result<()> {
                 args.config.as_deref(),
                 &show.set,
             ),
-            ProvidersAction::Query {
-                provider,
-                r#for,
-                interval,
-                keep,
-                set,
-            } => {
-                commands::providers::query::execute(
-                    provider,
-                    *r#for,
-                    *interval,
-                    keep.clone(),
-                    set,
-                    args.config.as_deref(),
-                )
-                .await
-            },
+        },
+        Some(Command::Collect(collect)) => {
+            commands::collect::execute(collect, args.config.as_deref()).await
         },
         Some(Command::Run) => commands::run::execute(args.config.as_deref()).await,
         None => {
