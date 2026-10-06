@@ -17,6 +17,7 @@ use clap::CommandFactory;
 use clap::Parser;
 use cli::Args;
 use cli::Command;
+use cli::ProviderConfigAction;
 use cli::ProvidersAction;
 
 #[tokio::main]
@@ -39,9 +40,13 @@ async fn dispatch_command() -> Result<()> {
             ProvidersAction::Describe { provider } => {
                 commands::providers::describe::execute(provider)
             },
-            ProvidersAction::Show { provider, set } => {
-                commands::providers::show::execute(provider.as_deref(), args.config.as_deref(), set)
-            },
+            ProvidersAction::Config {
+                action: ProviderConfigAction::Show(show),
+            } => commands::providers::show::execute(
+                show.provider.as_deref(),
+                args.config.as_deref(),
+                &show.set,
+            ),
             ProvidersAction::Query {
                 provider,
                 r#for,
