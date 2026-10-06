@@ -39,7 +39,7 @@ pub(crate) fn execute(name: &str) -> Result<()> {
         println!("  mounts must contain at least one path when enabled.");
     }
     println!(
-        "Use these keys with `providers show {name} --set` or `providers query {name} --set`."
+        "Use these keys with `providers config show {name} --set` or `providers query {name} --set`."
     );
     println!("Provider keys may also use the `{name}.` prefix with --set.");
     println!("In TOML, put provider keys under [{name}].");
