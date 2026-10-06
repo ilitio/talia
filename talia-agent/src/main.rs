@@ -9,6 +9,7 @@
 mod cli;
 mod commands;
 mod control;
+mod init_tracing;
 mod local_config;
 
 use anyhow::Result;
@@ -16,7 +17,6 @@ use clap::Parser;
 use cli::Args;
 use cli::Command;
 use cli::ProvidersAction;
-use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
@@ -27,11 +27,10 @@ async fn main() {
 }
 
 async fn dispatch_command() -> Result<()> {
+    // Select the process-wide TLS provider before HTTP or WebSocket clients are created.
     let _ = rustls::crypto::ring::default_provider().install_default();
     let args = Args::parse();
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new(args.log_filter))
-        .init();
+    init_tracing::init(&args.log_filter);
 
     match &args.command {
         Some(Command::Providers { action }) => match action {
