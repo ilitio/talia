@@ -13,6 +13,7 @@ mod init_tracing;
 mod local_config;
 
 use anyhow::Result;
+use clap::CommandFactory;
 use clap::Parser;
 use cli::Args;
 use cli::Command;
@@ -59,6 +60,11 @@ async fn dispatch_command() -> Result<()> {
                 .await
             },
         },
-        Some(Command::Run) | None => commands::run::execute(args.config.as_deref()).await,
+        Some(Command::Run) => commands::run::execute(args.config.as_deref()).await,
+        None => {
+            Args::command().print_help()?;
+            println!();
+            Ok(())
+        },
     }
 }

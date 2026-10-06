@@ -81,7 +81,8 @@ talia-agent providers query tcp --config tcp.toml --for 30s \
 ```
 
 `--version` prints the agent package version and also works after a subcommand.
-`run` starts the long-running agent and is the default command if omitted.
+`run` starts the long-running agent. Without a command, the agent prints help;
+starting the service requires an explicit `run`.
 `--config` accepts a local TOML file in any command position; alternatively set
 `TALIA_AGENT_CONFIG`. Without either, built-in defaults apply. The `run` command
 exports to the configured OTLP endpoint. `providers query` runs one provider
