@@ -20,13 +20,13 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
-    if let Err(error) = dispatch().await {
+    if let Err(error) = dispatch_command().await {
         eprintln!("talia-agent failed: {error:#}");
         std::process::exit(1);
     }
 }
 
-async fn dispatch() -> Result<()> {
+async fn dispatch_command() -> Result<()> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let args = Args::parse();
     tracing_subscriber::fmt()
