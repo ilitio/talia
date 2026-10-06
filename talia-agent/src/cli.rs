@@ -22,7 +22,7 @@ pub(crate) struct Args {
 
 #[derive(Subcommand)]
 pub(crate) enum Command {
-    /// Run the agent service (default when omitted).
+    /// Run the agent service.
     Run,
     /// Work with data providers.
     Providers {
