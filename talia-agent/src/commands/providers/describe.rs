@@ -38,9 +38,7 @@ pub(crate) fn execute(name: &str) -> Result<()> {
     if name == "storage" {
         println!("  mounts must contain at least one path when enabled.");
     }
-    println!(
-        "Use these keys with `providers config show {name} --set` or `providers query {name} --set`."
-    );
+    println!("Use these keys with `providers config show {name} --set` or `collect {name} --set`.");
     println!("Provider keys may also use the `{name}.` prefix with --set.");
     println!("In TOML, put provider keys under [{name}].");
     if name == "tcp" {
