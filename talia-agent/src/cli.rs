@@ -22,7 +22,7 @@ pub(crate) struct Args {
 
 #[derive(Subcommand)]
 pub(crate) enum Command {
-    /// Run the agent service (default when omitted).
+    /// Run the agent service.
     Run,
     /// Work with data providers.
     Providers {
@@ -40,13 +40,10 @@ pub(crate) enum ProvidersAction {
         /// Provider name (see `providers list`).
         provider: String,
     },
-    /// Print local fallback provider settings as TOML (all when omitted).
-    Show {
-        /// Provider name, e.g. `tcp`.
-        provider: Option<String>,
-        /// Override a provider setting, e.g. `--set interval_seconds=5`.
-        #[arg(long, value_name = "KEY=VALUE")]
-        set: Vec<String>,
+    /// Inspect local provider configuration.
+    Config {
+        #[command(subcommand)]
+        action: ProviderConfigAction,
     },
     /// Collect one provider's samples to stdout for a fixed duration.
     Query {
@@ -65,6 +62,21 @@ pub(crate) enum ProvidersAction {
         #[arg(long, value_name = "KEY=VALUE")]
         set: Vec<String>,
     },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum ProviderConfigAction {
+    /// Print local fallback settings as TOML; this does not read live agent settings.
+    Show(ProviderShowArgs),
+}
+
+#[derive(clap::Args)]
+pub(crate) struct ProviderShowArgs {
+    /// Provider name, e.g. `tcp` (all providers when omitted).
+    pub(crate) provider: Option<String>,
+    /// Temporarily override a setting in this preview; does not save it.
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub(crate) set: Vec<String>,
 }
 
 #[cfg(test)]

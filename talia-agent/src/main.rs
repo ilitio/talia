@@ -9,14 +9,16 @@
 mod cli;
 mod commands;
 mod control;
+mod init_tracing;
 mod local_config;
 
 use anyhow::Result;
+use clap::CommandFactory;
 use clap::Parser;
 use cli::Args;
 use cli::Command;
+use cli::ProviderConfigAction;
 use cli::ProvidersAction;
-use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
@@ -27,11 +29,10 @@ async fn main() {
 }
 
 async fn dispatch_command() -> Result<()> {
+    // Select the process-wide TLS provider before HTTP or WebSocket clients are created.
     let _ = rustls::crypto::ring::default_provider().install_default();
     let args = Args::parse();
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new(args.log_filter))
-        .init();
+    init_tracing::init(&args.log_filter);
 
     match &args.command {
         Some(Command::Providers { action }) => match action {
@@ -39,9 +40,13 @@ async fn dispatch_command() -> Result<()> {
             ProvidersAction::Describe { provider } => {
                 commands::providers::describe::execute(provider)
             },
-            ProvidersAction::Show { provider, set } => {
-                commands::providers::show::execute(provider.as_deref(), args.config.as_deref(), set)
-            },
+            ProvidersAction::Config {
+                action: ProviderConfigAction::Show(show),
+            } => commands::providers::show::execute(
+                show.provider.as_deref(),
+                args.config.as_deref(),
+                &show.set,
+            ),
             ProvidersAction::Query {
                 provider,
                 r#for,
@@ -60,6 +65,11 @@ async fn dispatch_command() -> Result<()> {
                 .await
             },
         },
-        Some(Command::Run) | None => commands::run::execute(args.config.as_deref()).await,
+        Some(Command::Run) => commands::run::execute(args.config.as_deref()).await,
+        None => {
+            Args::command().print_help()?;
+            println!();
+            Ok(())
+        },
     }
 }

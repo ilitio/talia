@@ -69,10 +69,10 @@ talia-agent --version
 talia-agent run --config /etc/talia/talia-agent.toml
 talia-agent providers list
 talia-agent providers describe tcp
-talia-agent providers show tcp --config /etc/talia/talia-agent.toml
-talia-agent providers show --config /etc/talia/talia-agent.toml
+talia-agent providers config show tcp --config /etc/talia/talia-agent.toml
+talia-agent providers config show --config /etc/talia/talia-agent.toml
 talia-agent providers query tcp --config /etc/talia/talia-agent.toml --for 30s --interval 5s
-talia-agent providers show tcp --config tcp.toml \
+talia-agent providers config show tcp --config tcp.toml \
   --set interval_seconds=5 \
   --set pod_discovery.cri_socket=/run/containerd/containerd.sock
 talia-agent providers query tcp --config tcp.toml --for 30s \
@@ -81,7 +81,8 @@ talia-agent providers query tcp --config tcp.toml --for 30s \
 ```
 
 `--version` prints the agent package version and also works after a subcommand.
-`run` starts the long-running agent and is the default command if omitted.
+`run` starts the long-running agent. Without a command, the agent prints help;
+starting the service requires an explicit `run`.
 `--config` accepts a local TOML file in any command position; alternatively set
 `TALIA_AGENT_CONFIG`. Without either, built-in defaults apply. The `run` command
 exports to the configured OTLP endpoint. `providers query` runs one provider
@@ -90,16 +91,17 @@ interval unless `--interval` overrides it. An explicit query runs even when the
 provider's `enabled` setting is `false`. Providers that measure rates may need
 at least one full interval before printing a sample.
 
-`providers show` prints the selected provider's resolved local fallback settings
-as TOML (or every provider when no name is given). The `tcp` provider also
-prints its shared `[pod_discovery]` settings. These commands do not
-contact the control server or read the last-known config. The running agent may
-instead be using cached settings from `state_dir/last-config.json` or a newer
-remote config from the control server.
+`providers config show` prints the selected provider's resolved local fallback
+settings as TOML (or every provider when no name is given). The `tcp` provider
+also prints its shared `[pod_discovery]` settings. `--set` changes this preview
+only; it does not write the TOML file or update a running agent. This command
+does not contact the control server or read the last-known config. The running
+agent may instead be using cached settings from `state_dir/last-config.json` or
+a newer remote config from the control server.
 
 `providers describe <name>` lists the keys accepted by `--set`, their value
 formats, and built-in defaults. It also names the TOML sections for those keys.
-Use `providers show <name> --config <file>` to see values from a local file.
+Use `providers config show <name> --config <file>` to see values from a local file.
 
 A provider can use a small TOML file with just its own section and any shared
 input it needs. For example, `tcp.toml` can contain:
@@ -113,7 +115,7 @@ interval_seconds = 15
 cri_socket = "all"
 ```
 
-Pass it with `--config` to either `providers show tcp` or `providers query tcp`.
+Pass it with `--config` to either `providers config show tcp` or `providers query tcp`.
 Repeat `--set KEY=VALUE` to override settings for the selected provider. Use
 unprefixed keys such as `interval_seconds=5`; `tcp.interval_seconds=5` also
 works. Shared TCP discovery uses `pod_discovery.cri_socket=...`. Strings can be
