@@ -72,6 +72,7 @@ talia-agent providers list --descriptions
 talia-agent providers describe tcp
 talia-agent providers config show tcp --config /etc/talia/talia-agent.toml
 talia-agent providers config show --config /etc/talia/talia-agent.toml
+talia-agent collect tcp --config /etc/talia/talia-agent.toml
 talia-agent collect tcp --config /etc/talia/talia-agent.toml --for 30s --interval 5s
 talia-agent providers config show tcp --config tcp.toml \
   --set interval_seconds=5 \
@@ -92,8 +93,9 @@ over the local runtime fallbacks. If control credentials are configured, the
 control server can update runtime settings while the agent runs. The `run`
 command exports metrics to the OTLP endpoint from the local bootstrap config.
 
-`collect` runs one provider in the foreground and prints JSON samples to stdout;
-it uses the provider's configured interval unless `--interval` overrides it.
+`collect` runs one provider in the foreground and prints JSON samples to stdout.
+Without `--for`, it continues until Ctrl-C; `--for` stops it after a duration.
+It uses the provider's configured interval unless `--interval` overrides it.
 An explicit collection runs even when the provider's `enabled` setting is
 `false`. Providers that measure rates
 may need at least one full interval before printing a sample.
