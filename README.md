@@ -82,13 +82,19 @@ talia-agent collect tcp --config tcp.toml --for 30s \
 
 `--version` prints the agent package version and also works after a subcommand.
 `run` starts the long-running agent. Without a command, the agent prints help;
-starting the service requires an explicit `run`.
-`--config` accepts a local TOML file in any command position; alternatively set
-`TALIA_AGENT_CONFIG`. Without either, built-in defaults apply. The `run` command
-exports to the configured OTLP endpoint. `collect` runs one provider in the
-foreground and prints JSON samples to stdout; it uses the provider's configured
-interval unless `--interval` overrides it. An explicit collection runs even
-when the provider's `enabled` setting is `false`. Providers that measure rates
+starting the service requires an explicit `run`. Pass `--config` in any command
+position, or set `TALIA_AGENT_CONFIG`, to load local TOML bootstrap settings and
+fallback runtime settings. Without either, built-in defaults apply. The local
+bootstrap settings select the OTLP endpoint, state directory, and control
+connection. At startup, a valid `state_dir/last-config.json` takes precedence
+over the local runtime fallbacks. If control credentials are configured, the
+control server can update runtime settings while the agent runs. The `run`
+command exports metrics to the OTLP endpoint from the local bootstrap config.
+
+`collect` runs one provider in the foreground and prints JSON samples to stdout;
+it uses the provider's configured interval unless `--interval` overrides it.
+An explicit collection runs even when the provider's `enabled` setting is
+`false`. Providers that measure rates
 may need at least one full interval before printing a sample.
 
 `providers config show` prints the selected provider's resolved local fallback
