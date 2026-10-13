@@ -1,6 +1,6 @@
 //! [`Sink`](super::super::pipeline::Sink) that prints samples as JSON lines.
 //!
-//! Used by the `query` CLI command for bpftrace-style one-shot collection.
+//! Used by the `collect` CLI command for foreground collection.
 
 use std::time::UNIX_EPOCH;
 
