@@ -56,6 +56,10 @@ impl Provider for DiskIoProvider {
         "disk_io"
     }
 
+    fn brief_description() -> &'static str {
+        "Measures disk I/O bytes, operations, errors, latency, and queue depth using eBPF."
+    }
+
     /// Updates the sampling window, e.g. after a config change.
     fn set_window(&mut self, window: Duration) {
         self.window = window;

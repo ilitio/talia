@@ -31,6 +31,8 @@ pub type ProviderFactory =
 pub struct CollectorSpec {
     /// Stable collector name, used in logs.
     pub name: &'static str,
+    /// One-sentence summary for provider discovery in the CLI.
+    pub brief_description: &'static str,
     /// Reads `(enabled, interval)` from the runtime config.
     pub schedule: fn(&AgentRuntimeConfig) -> (bool, Duration),
     /// Builds the provider. Called lazily on first enable and retried after
@@ -47,6 +49,7 @@ pub fn collector_specs() -> Vec<CollectorSpec> {
     vec![
         CollectorSpec {
             name: "storage",
+            brief_description: StorageProvider::brief_description(),
             schedule: |config| {
                 (
                     config.storage.enabled,
@@ -60,6 +63,7 @@ pub fn collector_specs() -> Vec<CollectorSpec> {
         },
         CollectorSpec {
             name: "memory",
+            brief_description: MemoryProvider::brief_description(),
             schedule: |config| {
                 (
                     config.memory.enabled,
@@ -71,6 +75,7 @@ pub fn collector_specs() -> Vec<CollectorSpec> {
         },
         CollectorSpec {
             name: "cpu",
+            brief_description: CpuProvider::brief_description(),
             schedule: |config| {
                 (
                     config.cpu.enabled,
@@ -84,6 +89,7 @@ pub fn collector_specs() -> Vec<CollectorSpec> {
         },
         CollectorSpec {
             name: "network",
+            brief_description: NetworkProvider::brief_description(),
             schedule: |config| {
                 (
                     config.network.enabled,
@@ -98,6 +104,7 @@ pub fn collector_specs() -> Vec<CollectorSpec> {
         },
         CollectorSpec {
             name: "tcp",
+            brief_description: TcpProvider::brief_description(),
             schedule: |config| {
                 (
                     config.tcp.enabled,
@@ -111,6 +118,7 @@ pub fn collector_specs() -> Vec<CollectorSpec> {
         },
         CollectorSpec {
             name: "disk_io",
+            brief_description: DiskIoProvider::brief_description(),
             schedule: |config| {
                 (
                     config.disk_io.enabled,

@@ -36,7 +36,9 @@ async fn dispatch_command() -> Result<()> {
 
     match &args.command {
         Some(Command::Providers { action }) => match action {
-            ProvidersAction::List => commands::providers::list::execute(),
+            ProvidersAction::List { descriptions } => {
+                commands::providers::list::execute(*descriptions)
+            },
             ProvidersAction::Describe { provider } => {
                 commands::providers::describe::execute(provider)
             },

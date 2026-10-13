@@ -99,6 +99,10 @@ impl Provider for TcpProvider {
         "tcp"
     }
 
+    fn brief_description() -> &'static str {
+        "Reports TCP traffic, retransmissions, timeouts, and connections for Kubernetes pods."
+    }
+
     /// Picks up `cri_socket` changes without rebuilding the provider.
     fn reconfigure(&mut self, config: &AgentRuntimeConfig) {
         self.discovery
