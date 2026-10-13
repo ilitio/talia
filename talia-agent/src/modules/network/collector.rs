@@ -1,4 +1,4 @@
-//! eBPF-backed network byte accounting.
+//! BPF-backed network byte accounting.
 
 use std::collections::BTreeMap;
 use std::convert::TryInto;
@@ -52,27 +52,27 @@ impl NetworkDirection {
     }
 }
 
-/// Errors returned by the eBPF network collector.
+/// Errors returned by the BPF network collector.
 #[derive(Debug, Error)]
 pub enum NetworkCollectorError {
-    /// The embedded eBPF object could not be loaded.
+    /// The embedded BPF object could not be loaded.
     #[error("failed to load Talia network BPF object: {0}")]
     Load(#[from] aya::EbpfError),
-    /// The embedded eBPF object did not contain the expected program.
+    /// The embedded BPF object did not contain the expected program.
     #[error("missing Talia network BPF program {0}")]
     MissingProgram(&'static str),
-    /// An eBPF program could not be configured or attached.
+    /// An BPF program could not be configured or attached.
     #[error("failed to configure Talia network BPF program: {0}")]
     Program(#[from] aya::programs::ProgramError),
-    /// The embedded eBPF object did not contain the expected map.
+    /// The embedded BPF object did not contain the expected map.
     #[error("missing Talia network BPF map {0}")]
     MissingMap(&'static str),
-    /// An eBPF map could not be opened or read.
+    /// An BPF map could not be opened or read.
     #[error("failed to open or read Talia network BPF map: {0}")]
     Map(#[from] aya::maps::MapError),
 }
 
-/// Stateful eBPF collector for lightweight network traffic metrics.
+/// Stateful BPF collector for lightweight network traffic metrics.
 pub struct NetworkCollector {
     _bpf: Ebpf,
     network_counters_map: PerCpuHashMap<MapData, RawNetworkKey, RawNetworkCounters>,
@@ -80,7 +80,7 @@ pub struct NetworkCollector {
 }
 
 impl NetworkCollector {
-    /// Loads and attaches the eBPF programs required for network collection.
+    /// Loads and attaches the BPF programs required for network collection.
     pub fn load() -> Result<Self, NetworkCollectorError> {
         let mut bpf = Ebpf::load(include_bytes_aligned!(concat!(
             env!("OUT_DIR"),

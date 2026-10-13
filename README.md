@@ -110,7 +110,7 @@ a newer remote config from the control server.
 formats, and built-in defaults. It also names the TOML sections for those keys.
 Use `providers config show <name> --config <file>` to see values from a local file.
 `providers list` prints names only by default; `--descriptions` adds one sentence
-beside each name without loading any provider or eBPF program.
+beside each name without loading any provider or BPF program.
 
 A provider can use a small TOML file with just its own section and any shared
 input it needs. For example, `tcp.toml` can contain:
@@ -154,9 +154,9 @@ tables are optional; omitted fields get built-in defaults. The config bootstraps
 - OTLP endpoint
 - state directory
 - fallback runtime config
-- optional eBPF CPU collector settings
-- optional eBPF network collector settings
-- optional eBPF disk I/O collector settings
+- optional BPF CPU collector settings
+- optional BPF network collector settings
+- optional BPF disk I/O collector settings
 - optional TCP collector and CRI socket settings
 - memory pressure collector settings
 
@@ -258,16 +258,16 @@ Default intervals:
 
 - storage collection: `60s`
 - memory pressure collection: `60s`
-- eBPF CPU collection window: `1s`
-- eBPF network collection window: `1s`
-- eBPF disk I/O collection window: `1s`
+- BPF CPU collection window: `1s`
+- BPF network collection window: `1s`
+- BPF disk I/O collection window: `1s`
 - TCP collection: `15s` (disabled by default)
 - control heartbeat: `60s`
 - config polling fallback: `15m` plus deterministic per-agent jitter
 
 ## CPU Metrics
 
-The CPU collector uses CO-RE eBPF and is disabled by default because it requires
+The CPU collector uses CO-RE BPF and is disabled by default because it requires
 BPF privileges. The agent vendors a minimal `src/bpf/vmlinux.h` with only the
 scalar helper types, map constants, and `task_struct` fields needed by the
 collector. Runtime CO-RE relocation still uses the target kernel BTF, and the
@@ -433,7 +433,7 @@ The storage and memory collectors do not require root. Run them as the dedicated
 unprivileged `talia` user with write access only to the state directory and read
 access to config and token files.
 
-The current eBPF collectors require the optional privilege drop-in packaged with
+The current BPF collectors require the optional privilege drop-in packaged with
 each release. Enable it only on reviewed hosts that use CPU, network, or disk I/O
 collection. The base service remains unprivileged by default.
 

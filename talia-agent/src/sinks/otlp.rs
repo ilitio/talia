@@ -141,29 +141,27 @@ impl OtlpSink {
             cpu_utilization: meter
                 .f64_gauge("system.cpu.utilization")
                 .with_unit("1")
-                .with_description(
-                    "Per-CPU utilization ratios from Talia eBPF scheduler accounting.",
-                )
+                .with_description("Per-CPU utilization ratios from Talia BPF scheduler accounting.")
                 .build(),
             network_io: meter
                 .u64_counter("system.network.io")
                 .with_unit("By")
-                .with_description("Host-wide network bytes from Talia eBPF packet accounting.")
+                .with_description("Host-wide network bytes from Talia BPF packet accounting.")
                 .build(),
             disk_io: meter
                 .u64_counter("system.disk.io")
                 .with_unit("By")
-                .with_description("Host-wide disk I/O bytes from Talia eBPF block accounting.")
+                .with_description("Host-wide disk I/O bytes from Talia BPF block accounting.")
                 .build(),
             disk_operations: meter
                 .u64_counter("system.disk.operations")
                 .with_unit("{operation}")
-                .with_description("Host-wide disk I/O operations from Talia eBPF block accounting.")
+                .with_description("Host-wide disk I/O operations from Talia BPF block accounting.")
                 .build(),
             disk_errors: meter
                 .u64_counter("system.disk.errors")
                 .with_unit("{error}")
-                .with_description("Host-wide disk I/O errors from Talia eBPF block accounting.")
+                .with_description("Host-wide disk I/O errors from Talia BPF block accounting.")
                 .build(),
             disk_latency: meter
                 .f64_gauge("system.disk.io.latency")

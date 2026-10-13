@@ -23,7 +23,7 @@ pub const CPU_STATE_ATTRIBUTE: &str = "system.cpu.state";
 
 /// CPU scheduler accounting data provider.
 ///
-/// Wraps the eBPF [`CpuCollector`]; loading attaches the eBPF program and can
+/// Wraps the BPF [`CpuCollector`]; loading attaches the BPF program and can
 /// fail, so construction is fallible. The sampling window tracks the agent's
 /// configured CPU interval and is refreshed by the collection loop before
 /// every collection.
@@ -33,7 +33,7 @@ pub struct CpuProvider {
 }
 
 impl CpuProvider {
-    /// Loads the eBPF program and creates a provider for the given window.
+    /// Loads the BPF program and creates a provider for the given window.
     pub fn load(window: Duration) -> Result<Self, ProviderError> {
         CpuCollector::load()
             .map(|collector| Self { collector, window })
@@ -47,7 +47,7 @@ impl Provider for CpuProvider {
     }
 
     fn brief_description() -> &'static str {
-        "Measures per-CPU utilization from scheduler events using eBPF."
+        "Measures per-CPU utilization from scheduler events using BPF."
     }
 
     /// Updates the sampling window, e.g. after a config change.

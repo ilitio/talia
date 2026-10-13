@@ -5,10 +5,10 @@ rollback support. Operators own each host rollout and its credentials.
 
 ## Release
 
-A `vMAJOR.MINOR.PATCH` tag builds a Linux release with embedded eBPF programs.
+A `vMAJOR.MINOR.PATCH` tag builds a Linux release with embedded BPF programs.
 The release contains both binaries, example configuration, the systemd unit,
 deployment scripts, and a SHA-256 checksum. The release workflow fails instead
-of publishing an agent with placeholder eBPF objects.
+of publishing an agent with placeholder BPF objects.
 
 Create a release from a reviewed commit on `main`:
 

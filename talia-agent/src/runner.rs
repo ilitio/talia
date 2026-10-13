@@ -39,7 +39,7 @@ pub struct CollectorSpec {
     /// load failures.
     pub factory: ProviderFactory,
     /// Whether to sleep one interval before each collection. Providers that
-    /// measure rates over the window (e.g. eBPF) need a full elapsed window;
+    /// measure rates over the window (e.g. BPF) need a full elapsed window;
     /// point-in-time readers collect immediately.
     pub sleep_before_collect: bool,
 }
@@ -186,7 +186,7 @@ pub async fn run_collector(
         };
         taken.set_window(interval);
         taken.reconfigure(&config);
-        // `collect()` is synchronous and may block (procfs reads, eBPF
+        // `collect()` is synchronous and may block (procfs reads, BPF
         // syscalls, pod discovery's CRI worker): run it on the blocking
         // pool so the async workers never stall.
         let (taken, result) = match tokio::task::spawn_blocking(move || {

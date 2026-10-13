@@ -1,4 +1,4 @@
-//! eBPF-backed disk I/O byte accounting.
+//! BPF-backed disk I/O byte accounting.
 
 use std::collections::BTreeMap;
 use std::convert::TryInto;
@@ -60,27 +60,27 @@ impl DiskIoDirection {
     }
 }
 
-/// Errors returned by the eBPF disk I/O collector.
+/// Errors returned by the BPF disk I/O collector.
 #[derive(Debug, Error)]
 pub enum DiskIoCollectorError {
-    /// The embedded eBPF object could not be loaded.
+    /// The embedded BPF object could not be loaded.
     #[error("failed to load Talia disk I/O BPF object: {0}")]
     Load(#[from] aya::EbpfError),
-    /// The embedded eBPF object did not contain the expected program.
+    /// The embedded BPF object did not contain the expected program.
     #[error("missing Talia disk I/O BPF program {0}")]
     MissingProgram(&'static str),
-    /// An eBPF program could not be configured or attached.
+    /// An BPF program could not be configured or attached.
     #[error("failed to configure Talia disk I/O BPF program: {0}")]
     Program(#[from] aya::programs::ProgramError),
-    /// The embedded eBPF object did not contain the expected map.
+    /// The embedded BPF object did not contain the expected map.
     #[error("missing Talia disk I/O BPF map {0}")]
     MissingMap(&'static str),
-    /// An eBPF map could not be opened or read.
+    /// An BPF map could not be opened or read.
     #[error("failed to open or read Talia disk I/O BPF map: {0}")]
     Map(#[from] aya::maps::MapError),
 }
 
-/// Stateful eBPF collector for lightweight disk I/O traffic metrics.
+/// Stateful BPF collector for lightweight disk I/O traffic metrics.
 pub struct DiskIoCollector {
     _bpf: Ebpf,
     disk_io_counters_map: PerCpuHashMap<MapData, RawDiskIoKey, RawDiskIoCounters>,
@@ -88,7 +88,7 @@ pub struct DiskIoCollector {
 }
 
 impl DiskIoCollector {
-    /// Loads and attaches the eBPF program required for disk I/O collection.
+    /// Loads and attaches the BPF program required for disk I/O collection.
     pub fn load() -> Result<Self, DiskIoCollectorError> {
         let mut bpf = Ebpf::load(include_bytes_aligned!(concat!(
             env!("OUT_DIR"),
