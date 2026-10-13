@@ -34,10 +34,10 @@ pub(crate) async fn execute(collect: &CollectArgs, path: Option<&Path>) -> Resul
     .await
 }
 
-/// Collects one provider's samples into a sink for the given duration.
+/// Collects one provider's samples until the optional duration or Ctrl-C.
 async fn collect_provider(
     name: &str,
-    duration: Duration,
+    duration: Option<Duration>,
     interval: Option<Duration>,
     keep: Vec<String>,
     sink: &dyn Sink,
@@ -57,40 +57,53 @@ async fn collect_provider(
     } else {
         vec![Arc::new(NameFilter::new(keep))]
     };
-    let start = std::time::Instant::now();
-    let mut collected = false;
-    let mut last_error = None;
-    loop {
-        if spec.sleep_before_collect {
-            tokio::time::sleep(interval).await;
-        }
-        provider.set_window(interval);
-        match provider.collect() {
-            Ok(samples) => {
-                collected = true;
-                for sample in samples {
-                    if let Some(sample) = process_sample(&processors, sample) {
-                        sink.emit(&sample, &config.version);
+    let collection = async {
+        let start = std::time::Instant::now();
+        let mut collected = false;
+        let mut last_error = None;
+        loop {
+            if spec.sleep_before_collect {
+                tokio::time::sleep(interval).await;
+            }
+            provider.set_window(interval);
+            match provider.collect() {
+                Ok(samples) => {
+                    collected = true;
+                    for sample in samples {
+                        if let Some(sample) = process_sample(&processors, sample) {
+                            sink.emit(&sample, &config.version);
+                        }
                     }
-                }
-            },
-            Err(error) => {
-                tracing::warn!(provider = name, error = %error, "talia_collection_failed");
-                last_error = Some(error.to_string());
-            },
+                },
+                Err(error) => {
+                    tracing::warn!(provider = name, error = %error, "talia_collection_failed");
+                    last_error = Some(error.to_string());
+                },
+            }
+            if duration.is_some_and(|limit| start.elapsed() >= limit) {
+                break;
+            }
+            if !spec.sleep_before_collect {
+                let sleep = duration.map_or(interval, |limit| {
+                    interval.min(limit.saturating_sub(start.elapsed()))
+                });
+                tokio::time::sleep(sleep).await;
+            }
         }
-        if start.elapsed() >= duration {
-            break;
+        if !collected {
+            anyhow::bail!(
+                "provider '{name}' did not collect successfully: {}",
+                last_error.unwrap_or_else(|| "no collection was attempted".to_string())
+            );
         }
-        if !spec.sleep_before_collect {
-            tokio::time::sleep(interval.min(duration.saturating_sub(start.elapsed()))).await;
+        Ok(())
+    };
+
+    tokio::select! {
+        result = tokio::signal::ctrl_c() => {
+            result.context("failed to listen for shutdown signal")?;
+            Ok(())
         }
+        result = collection => result,
     }
-    if !collected {
-        anyhow::bail!(
-            "provider '{name}' did not collect successfully: {}",
-            last_error.unwrap_or_else(|| "no collection was attempted".to_string())
-        );
-    }
-    Ok(())
 }

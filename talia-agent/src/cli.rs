@@ -22,7 +22,7 @@ pub(crate) struct Args {
 
 #[derive(Subcommand)]
 pub(crate) enum Command {
-    /// Collect one provider's samples to stdout for a fixed duration.
+    /// Collect one provider's samples to stdout until Ctrl-C or --for expires.
     Collect(CollectArgs),
     /// Work with data providers.
     Providers {
@@ -76,9 +76,9 @@ pub(crate) struct ProviderShowArgs {
 pub(crate) struct CollectArgs {
     /// Provider name (see `providers list`).
     pub(crate) provider: String,
-    /// How long to collect, e.g. `30s`, `5m`.
+    /// Stop after this duration, e.g. `30s`, `5m`; omit to run until Ctrl-C.
     #[arg(long, value_parser = humantime::parse_duration)]
-    pub(crate) r#for: Duration,
+    pub(crate) r#for: Option<Duration>,
     /// Collection interval; defaults to the provider's local setting.
     #[arg(long, value_parser = humantime::parse_duration)]
     pub(crate) interval: Option<Duration>,
