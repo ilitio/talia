@@ -1,4 +1,4 @@
-//! eBPF-backed CPU collector for lightweight scheduler accounting.
+//! BPF-backed CPU collector for lightweight scheduler accounting.
 
 use std::convert::TryInto;
 use std::time::Duration;
@@ -52,30 +52,30 @@ impl CpuSnapshot {
     }
 }
 
-/// Errors returned by the eBPF CPU collector.
+/// Errors returned by the BPF CPU collector.
 #[derive(Debug, Error)]
 pub enum CpuCollectorError {
-    /// The embedded eBPF object could not be loaded.
+    /// The embedded BPF object could not be loaded.
     #[error("failed to load Talia CPU BPF object: {0}")]
     Load(#[from] aya::EbpfError),
     /// Kernel BTF metadata could not be loaded.
     #[error("failed to load kernel BTF for Talia CPU collector: {0}")]
     Btf(#[from] aya::BtfError),
-    /// The embedded eBPF object did not contain the expected program.
+    /// The embedded BPF object did not contain the expected program.
     #[error("missing Talia CPU BPF program {0}")]
     MissingProgram(&'static str),
-    /// An eBPF program could not be configured or attached.
+    /// An BPF program could not be configured or attached.
     #[error("failed to configure Talia CPU BPF program: {0}")]
     Program(#[from] aya::programs::ProgramError),
-    /// The embedded eBPF object did not contain the expected map.
+    /// The embedded BPF object did not contain the expected map.
     #[error("missing Talia CPU BPF map {0}")]
     MissingMap(&'static str),
-    /// An eBPF map could not be opened or read.
+    /// An BPF map could not be opened or read.
     #[error("failed to open or read Talia CPU BPF map: {0}")]
     Map(#[from] aya::maps::MapError),
 }
 
-/// Stateful eBPF collector for lightweight Talia CPU metrics.
+/// Stateful BPF collector for lightweight Talia CPU metrics.
 pub struct CpuCollector {
     _bpf: Ebpf,
     cpu_counters_map: PerCpuArray<MapData, RawCpuCounters>,
@@ -83,7 +83,7 @@ pub struct CpuCollector {
 }
 
 impl CpuCollector {
-    /// Loads and attaches the eBPF program required for CPU collection.
+    /// Loads and attaches the BPF program required for CPU collection.
     pub fn load() -> Result<Self, CpuCollectorError> {
         let mut bpf = Ebpf::load(include_bytes_aligned!(concat!(
             env!("OUT_DIR"),

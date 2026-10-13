@@ -32,7 +32,7 @@ impl ProviderError {
     }
 }
 
-/// A source of telemetry: eBPF programs, procfs readers, or anything else that
+/// A source of telemetry: BPF programs, procfs readers, or anything else that
 /// can produce [`Sample`]s on demand.
 ///
 /// Providers are deliberately synchronous and pull-based: the runner decides
@@ -51,7 +51,7 @@ pub trait Provider: Send {
 
     /// Updates the collection window before a collection. Default is a no-op.
     ///
-    /// eBPF providers use the window to scale their per-interval accounting.
+    /// BPF providers use the window to scale their per-interval accounting.
     fn set_window(&mut self, window: Duration) {
         let _ = window;
     }

@@ -22,7 +22,7 @@ pub const NETWORK_DIRECTION_ATTRIBUTE: &str = "network.io.direction";
 
 /// Network traffic accounting data provider.
 ///
-/// Wraps the eBPF [`NetworkCollector`]; loading attaches the eBPF program and
+/// Wraps the BPF [`NetworkCollector`]; loading attaches the BPF program and
 /// can fail, so construction is fallible. The sampling window tracks the
 /// agent's configured network interval and is refreshed by the collection
 /// loop before every collection.
@@ -32,7 +32,7 @@ pub struct NetworkProvider {
 }
 
 impl NetworkProvider {
-    /// Loads the eBPF program and creates a provider for the given window.
+    /// Loads the BPF program and creates a provider for the given window.
     pub fn load(window: Duration) -> Result<Self, ProviderError> {
         NetworkCollector::load()
             .map(|collector| Self { collector, window })
@@ -46,7 +46,7 @@ impl Provider for NetworkProvider {
     }
 
     fn brief_description() -> &'static str {
-        "Measures host network bytes sent and received using eBPF."
+        "Measures host network bytes sent and received using BPF."
     }
 
     /// Updates the sampling window, e.g. after a config change.

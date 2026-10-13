@@ -33,7 +33,7 @@ pub const DISK_DIRECTION_ATTRIBUTE: &str = "disk.io.direction";
 
 /// Disk I/O accounting data provider.
 ///
-/// Wraps the eBPF [`DiskIoCollector`]; loading attaches the eBPF program and
+/// Wraps the BPF [`DiskIoCollector`]; loading attaches the BPF program and
 /// can fail, so construction is fallible. The sampling window tracks the
 /// agent's configured disk I/O interval and is refreshed by the collection
 /// loop before every collection.
@@ -43,7 +43,7 @@ pub struct DiskIoProvider {
 }
 
 impl DiskIoProvider {
-    /// Loads the eBPF program and creates a provider for the given window.
+    /// Loads the BPF program and creates a provider for the given window.
     pub fn load(window: Duration) -> Result<Self, ProviderError> {
         DiskIoCollector::load()
             .map(|collector| Self { collector, window })
@@ -57,7 +57,7 @@ impl Provider for DiskIoProvider {
     }
 
     fn brief_description() -> &'static str {
-        "Measures disk I/O bytes, operations, errors, latency, and queue depth using eBPF."
+        "Measures disk I/O bytes, operations, errors, latency, and queue depth using BPF."
     }
 
     /// Updates the sampling window, e.g. after a config change.
