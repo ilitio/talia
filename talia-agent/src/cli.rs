@@ -29,7 +29,15 @@ pub(crate) enum Command {
         #[command(subcommand)]
         action: ProvidersAction,
     },
-    /// Run the agent service.
+    /// Run with local TOML or defaults, then cached or remote runtime settings.
+    ///
+    /// Local TOML comes from --config <FILE> or TALIA_AGENT_CONFIG; without
+    /// either, built-in defaults apply. It sets the OTLP endpoint, state
+    /// directory, control connection, and fallback runtime settings.
+    ///
+    /// At startup, a valid cached config in state_dir/last-config.json takes
+    /// precedence over the local runtime fallbacks. If control credentials are
+    /// configured, the server can update runtime settings while the agent runs.
     Run,
 }
 
