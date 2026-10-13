@@ -68,6 +68,7 @@ The installed binary uses the same commands as `cargo run -p talia-agent --`:
 talia-agent --version
 talia-agent run --config /etc/talia/talia-agent.toml
 talia-agent providers list
+talia-agent providers list --descriptions
 talia-agent providers describe tcp
 talia-agent providers config show tcp --config /etc/talia/talia-agent.toml
 talia-agent providers config show --config /etc/talia/talia-agent.toml
@@ -102,6 +103,8 @@ a newer remote config from the control server.
 `providers describe <name>` lists the keys accepted by `--set`, their value
 formats, and built-in defaults. It also names the TOML sections for those keys.
 Use `providers config show <name> --config <file>` to see values from a local file.
+`providers list` prints names only by default; `--descriptions` adds one sentence
+beside each name without loading any provider or eBPF program.
 
 A provider can use a small TOML file with just its own section and any shared
 input it needs. For example, `tcp.toml` can contain:

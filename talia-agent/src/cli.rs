@@ -36,7 +36,11 @@ pub(crate) enum Command {
 #[derive(Subcommand)]
 pub(crate) enum ProvidersAction {
     /// List available provider names.
-    List,
+    List {
+        /// Print a one-sentence description beside each provider.
+        #[arg(long)]
+        descriptions: bool,
+    },
     /// List a provider's accepted settings, value formats, and built-in defaults.
     Describe {
         /// Provider name (see `providers list`).

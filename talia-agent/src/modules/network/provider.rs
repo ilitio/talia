@@ -45,6 +45,10 @@ impl Provider for NetworkProvider {
         "network"
     }
 
+    fn brief_description() -> &'static str {
+        "Measures host network bytes sent and received using eBPF."
+    }
+
     /// Updates the sampling window, e.g. after a config change.
     fn set_window(&mut self, window: Duration) {
         self.window = window;

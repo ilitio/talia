@@ -41,6 +41,11 @@ pub trait Provider: Send {
     /// Stable registry name, e.g. `"storage"`. Used in config and CLI output.
     fn name(&self) -> &'static str;
 
+    /// One-sentence summary for CLI discovery, without constructing the provider.
+    fn brief_description() -> &'static str
+    where
+        Self: Sized;
+
     /// Collects one batch of samples. Called once per collection interval.
     fn collect(&mut self) -> Result<Vec<Sample>, ProviderError>;
 

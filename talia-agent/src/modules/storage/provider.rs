@@ -45,6 +45,10 @@ impl Provider for StorageProvider {
         "storage"
     }
 
+    fn brief_description() -> &'static str {
+        "Reports capacity, usage, and utilization for host filesystems."
+    }
+
     fn collect(&mut self) -> Result<Vec<Sample>, ProviderError> {
         collect_filesystems(&self.mounts)
             .map(|samples| samples.iter().flat_map(filesystem_samples).collect())

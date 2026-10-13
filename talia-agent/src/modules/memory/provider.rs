@@ -57,6 +57,10 @@ impl Provider for MemoryProvider {
         "memory"
     }
 
+    fn brief_description() -> &'static str {
+        "Reports host memory and swap usage, utilization, and swap I/O."
+    }
+
     fn collect(&mut self) -> Result<Vec<Sample>, ProviderError> {
         self.collector
             .collect()
